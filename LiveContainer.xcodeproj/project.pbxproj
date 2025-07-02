@@ -195,8 +195,6 @@
 				DecoratedAppSceneView.m,
 				DecoratedFloatingView.h,
 				DecoratedFloatingView.m,
-				MultitaskDockView.h,
-				MultitaskDockView.m,
 				PiPManager.h,
 				PiPManager.m,
 				ResizeHandleView.h,

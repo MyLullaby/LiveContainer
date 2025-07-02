@@ -25,6 +25,7 @@ NSString *lcAppGroupPath;
 NSString* lcAppUrlScheme;
 NSBundle* lcMainBundle;
 NSDictionary* guestAppInfo;
+NSString* lcGuestAppId;
 bool isLiveProcess = false;
 bool isSharedBundle = false;
 
@@ -53,6 +54,9 @@ bool isSharedBundle = false;
 }
 + (bool)isSharedApp {
     return isSharedBundle;
+}
++ (NSString*)lcGuestAppId {
+    return lcGuestAppId;
 }
 @end
 
@@ -308,10 +312,12 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     
     // Overwrite NSUserDefaults
     if([guestAppInfo[@"doUseLCBundleId"] boolValue]) {
-        NSUserDefaults.standardUserDefaults = [[NSUserDefaults alloc] initWithSuiteName:guestAppInfo[@"LCOrignalBundleIdentifier"]];
+        lcGuestAppId = guestAppInfo[@"LCOrignalBundleIdentifier"];
     } else {
-        NSUserDefaults.standardUserDefaults = [[NSUserDefaults alloc] initWithSuiteName:appBundle.bundleIdentifier];
+        lcGuestAppId = appBundle.bundleIdentifier;
+        
     }
+    NSUserDefaults.standardUserDefaults = [[NSUserDefaults alloc] initWithSuiteName:lcGuestAppId];
 
     // Overwrite home and tmp path
     NSString *newHomePath = nil;
