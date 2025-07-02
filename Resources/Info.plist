@@ -5,7 +5,7 @@
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDisplayName</key>
-	<string>LiveContainer</string>
+	<string>起点读书</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
