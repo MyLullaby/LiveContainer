@@ -527,7 +527,7 @@ int LiveContainerMain(int argc, char *argv[]) {
     NSString* lastLaunchDataUUID;
     if(!isLiveProcess) {
         lastLaunchDataUUID = [lcUserDefaults objectForKey:@"lastLaunchDataUUID"];
-    } else if ([lcUserDefaults objectForKey:selectedContainer]) {
+    } else {
         lastLaunchDataUUID = selectedContainer;
     }
     
@@ -544,6 +544,7 @@ int LiveContainerMain(int argc, char *argv[]) {
             preferencesTo = [docPathUrl.path stringByAppendingPathComponent:[NSString stringWithFormat:@"Data/Application/%@/Library/Preferences", lastLaunchDataUUID]];
         }
         // recover preferences
+        // this is not needed anymore, it's here for backward competability
         [LCSharedUtils dumpPreferenceToPath:preferencesTo dataUUID:lastLaunchDataUUID];
         if(!isLiveProcess) {
             [lcUserDefaults removeObjectForKey:@"lastLaunchDataUUID"];
@@ -555,15 +556,6 @@ int LiveContainerMain(int argc, char *argv[]) {
         selectedApp = nil;
         [lcUserDefaults removeObjectForKey:@"selected"];
         [lcUserDefaults removeObjectForKey:@"selectedContainer"];
-    } else if (isLiveProcess && [lcUserDefaults boolForKey:@"liveprocessRetrieveData"]) {
-        [lcUserDefaults removeObjectForKey:@"selected"];
-        [lcUserDefaults removeObjectForKey:@"selectedContainer"];
-        NSString* preferencesTo = [LCSharedUtils.appGroupPath.path stringByAppendingPathComponent:[NSString stringWithFormat:@"LiveContainer/Data/Application/%@/Library/Preferences", lastLaunchDataUUID]];
-        [LCSharedUtils dumpPreferenceToPath:preferencesTo dataUUID:lastLaunchDataUUID];
-        [LCSharedUtils setContainerUsingByThisLC:selectedContainer remove:YES];
-        [lcUserDefaults removeObjectForKey:@"liveprocessRetrieveData"];
-        exit(0);
-        return 0;
     }
     
     if(selectedApp && !selectedContainer) {
@@ -571,12 +563,11 @@ int LiveContainerMain(int argc, char *argv[]) {
     }
     NSString* runningLC = [LCSharedUtils getContainerUsingLCSchemeWithFolderName:selectedContainer];
     // if another instance is running, we just switch to that one, these should be called after uiapplication initialized
-    if(selectedApp && runningLC && ![runningLC isEqualToString:lcAppUrlScheme]) {
+    // however if the running lc is liveprocess and current lc is livecontainer1 we just continue
+    if(selectedApp && runningLC && ![runningLC isEqualToString:lcAppUrlScheme] &&
+       !([[NSUserDefaults lcAppUrlScheme] isEqualToString:@"livecontainer"] && [runningLC isEqualToString:@"liveprocess"])) {
         [lcUserDefaults removeObjectForKey:@"selected"];
         [lcUserDefaults removeObjectForKey:@"selectedContainer"];
-        if([[NSUserDefaults lcAppUrlScheme] isEqualToString:@"livecontainer"] && [runningLC isEqualToString:@"liveprocess"] ) {
-            runningLC = @"livecontainer";
-        }
         
         NSString* selectedAppBackUp = selectedApp;
         selectedApp = nil;
