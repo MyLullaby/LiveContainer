@@ -13,8 +13,7 @@
 #include <signal.h>
 #include <sys/mman.h>
 #include <stdlib.h>
-#include "TPRO.h"
-#import "../fishhook/fishhook.h"
+#include "../litehook/src/litehook.h"
 #import "Tweaks/Tweaks.h"
 #include <mach-o/ldsyms.h>
 
@@ -154,8 +153,8 @@ int hook__NSGetExecutablePath_overwriteExecPath(char*** dyldApiInstancePtr, char
 
     kern_return_t ret = builtin_vm_protect(mach_task_self(), (mach_vm_address_t)mainExecutablePathPtr, sizeof(mainExecutablePathPtr), false, PROT_READ | PROT_WRITE);
     if(ret != KERN_SUCCESS) {
-        BOOL tpro_ret = os_thread_self_restrict_tpro_to_rw();
-        assert(tpro_ret);
+        assert(os_tpro_is_supported());
+        os_thread_self_restrict_tpro_to_rw();
     }
     *mainExecutablePathPtr = newPath;
     if(ret != KERN_SUCCESS) {
@@ -268,7 +267,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     }
     
     if(isSharedBundle) {
-        [LCSharedUtils setContainerUsingByThisLC:dataUUID remove:NO];
+        [LCSharedUtils setContainerUsingByLC:lcAppUrlScheme folderName:dataUUID];
     }
     
     NSError *error;
@@ -317,7 +316,6 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
         lcGuestAppId = appBundle.bundleIdentifier;
         
     }
-    NSUserDefaults.standardUserDefaults = [[NSUserDefaults alloc] initWithSuiteName:lcGuestAppId];
 
     // Overwrite home and tmp path
     NSString *newHomePath = nil;
@@ -374,14 +372,6 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
         NSString *dirPath = [newHomePath stringByAppendingPathComponent:dir];
         [fm createDirectoryAtPath:dirPath withIntermediateDirectories:YES attributes:nil error:nil];
     }
-
-    [lcUserDefaults setObject:dataUUID forKey:@"lastLaunchDataUUID"];
-    if(isSharedBundle) {
-        [lcUserDefaults setObject:@"Shared" forKey:@"lastLaunchType"];
-    } else {
-        [lcUserDefaults setObject:@"Private" forKey:@"lastLaunchType"];
-    }
-
     
     // Overwrite NSBundle
     overwriteMainNSBundle(appBundle);
@@ -393,12 +383,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     if(!appBundle.executablePath) {
         return @"App's executable path not found. Please try force re-signing or reinstalling this app.";
     }
-    
-    if([guestAppInfo[@"fixBlackScreen"] boolValue]) {
-        dlopen("/System/Library/Frameworks/UIKit.framework/UIKit", RTLD_GLOBAL);
-        NSLog(@"[LC] Fix BlackScreen2 %@", [NSClassFromString(@"UIScreen") mainScreen]);
-    }
-    
+
     NSMutableArray<NSString *> *objcArgv = NSProcessInfo.processInfo.arguments.mutableCopy;
     objcArgv[0] = appBundle.executablePath;
     [NSProcessInfo.processInfo performSelector:@selector(setArguments:) withObject:objcArgv];
@@ -417,6 +402,11 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     NSFMGuestHooksInit();
     initDead10ccFix();
 
+    if([guestAppInfo[@"fixBlackScreen"] boolValue]) {
+        dlopen("/System/Library/Frameworks/UIKit.framework/UIKit", RTLD_GLOBAL);
+        NSLog(@"[LC] Fix BlackScreen2 %@", [NSClassFromString(@"UIScreen") mainScreen]);
+    }
+    
     // Preload executable to bypass RT_NOLOAD
     uint32_t appIndex = _dyld_image_count();
     appMainImageIndex = appIndex;
@@ -564,10 +554,13 @@ int LiveContainerMain(int argc, char *argv[]) {
     NSString* runningLC = [LCSharedUtils getContainerUsingLCSchemeWithFolderName:selectedContainer];
     // if another instance is running, we just switch to that one, these should be called after uiapplication initialized
     // however if the running lc is liveprocess and current lc is livecontainer1 we just continue
-    if(selectedApp && runningLC && ![runningLC isEqualToString:lcAppUrlScheme] &&
-       !([[NSUserDefaults lcAppUrlScheme] isEqualToString:@"livecontainer"] && [runningLC isEqualToString:@"liveprocess"])) {
+    if(selectedApp && runningLC) {
         [lcUserDefaults removeObjectForKey:@"selected"];
         [lcUserDefaults removeObjectForKey:@"selectedContainer"];
+        
+        if([runningLC isEqualToString:@"liveprocess"]) {
+            runningLC = @"livecontainer";
+        }
         
         NSString* selectedAppBackUp = selectedApp;
         selectedApp = nil;
@@ -600,8 +593,6 @@ int LiveContainerMain(int argc, char *argv[]) {
                     [[NSClassFromString(@"UIApplication") sharedApplication] openURL:url options:@{} completionHandler:nil];
 
                 }
-            } else {
-                [LCSharedUtils removeContainerUsingByLC: runningLC];
             }
         });
 
@@ -636,7 +627,7 @@ int LiveContainerMain(int argc, char *argv[]) {
             return 1;
         }
     }
-    [LCSharedUtils setContainerUsingByThisLC:nil remove:YES];
+    
     // recover language before reaching UI
     NSArray* savedLaunguage = [lcUserDefaults objectForKey:@"LCLastLanguages"];
     if(savedLaunguage) {

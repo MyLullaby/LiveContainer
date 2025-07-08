@@ -26,6 +26,14 @@ jobs:
       id: job_start_time
       run: echo "start_time=$(date +%s)" >> $GITHUB_OUTPUT
 
+    - name: Get latest commit info
+      id: commit_info
+      run: |
+        COMMIT_SHA=$(git rev-list -n 1 HEAD)
+        COMMIT_MSG=$(git log -1 --pretty=%s)
+        echo "commit_sha=$COMMIT_SHA" >> $GITHUB_ENV
+        echo "commit_msg=$COMMIT_MSG" >> $GITHUB_ENV
+
     - name: Update AltStore source
       id: update_source
       env:
