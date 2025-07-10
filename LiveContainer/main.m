@@ -1,4 +1,5 @@
 #import "FoundationPrivate.h"
+#import "LCMachOUtils.h"
 #import "LCSharedUtils.h"
 #import "UIKitPrivate.h"
 #import "utils.h"
@@ -60,11 +61,9 @@ bool isSharedBundle = false;
 @end
 
 static BOOL checkJITEnabled() {
-    // check if running on macOS
-    if (access("/Users", R_OK) == 0) {
-        return YES;
-    }
-    
+#if TARGET_OS_MACCATALYST || TARGET_OS_SIMULATOR
+    return YES;
+#else
     if([lcUserDefaults boolForKey:@"LCIgnoreJITOnLaunch"]) {
         return NO;
     }
@@ -81,6 +80,7 @@ static BOOL checkJITEnabled() {
     int flags;
     csops(getpid(), 0, &flags, sizeof(flags));
     return (flags & CS_DEBUGGED) != 0;
+#endif
 }
 
 static uint64_t rnd64(uint64_t v, uint64_t r) {
@@ -401,11 +401,6 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     SecItemGuestHooksInit();
     NSFMGuestHooksInit();
     initDead10ccFix();
-
-    if([guestAppInfo[@"fixBlackScreen"] boolValue]) {
-        dlopen("/System/Library/Frameworks/UIKit.framework/UIKit", RTLD_GLOBAL);
-        NSLog(@"[LC] Fix BlackScreen2 %@", [NSClassFromString(@"UIScreen") mainScreen]);
-    }
     
     // Preload executable to bypass RT_NOLOAD
     uint32_t appIndex = _dyld_image_count();
@@ -441,7 +436,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
         tweakLoaderLoaded = true;
     }
     
-    void *appHandle = dlopen(appExecPath, RTLD_LAZY|RTLD_GLOBAL|RTLD_FIRST);
+    void *appHandle = dlopenBypassingLock(appExecPath, RTLD_LAZY|RTLD_GLOBAL|RTLD_FIRST);
     appExecutableHandle = appHandle;
     const char *dlerr = dlerror();
     

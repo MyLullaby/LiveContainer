@@ -462,18 +462,6 @@ uint32_t dyld_get_sdk_version(const struct mach_header* mh);
     [self save];
 }
 
-- (bool)fixBlackScreen {
-    if(_info[@"fixBlackScreen"] != nil) {
-        return [_info[@"fixBlackScreen"] boolValue];
-    } else {
-        return NO;
-    }
-}
-- (void)setFixBlackScreen:(bool)fixBlackScreen {
-    _info[@"fixBlackScreen"] = [NSNumber numberWithBool:fixBlackScreen];
-    [self save];
-}
-
 - (bool)dontInjectTweakLoader {
     if(_info[@"dontInjectTweakLoader"] != nil) {
         return [_info[@"dontInjectTweakLoader"] boolValue];

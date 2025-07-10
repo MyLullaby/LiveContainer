@@ -20,7 +20,6 @@ typedef NS_ENUM(NSInteger, LCOrientationLock){
 @property bool isHidden;
 @property bool doSymlinkInbox;
 @property bool hideLiveContainer;
-@property bool fixBlackScreen;
 @property bool dontLoadTweakLoader;
 @property bool dontInjectTweakLoader;
 @property UIColor* cachedColor;

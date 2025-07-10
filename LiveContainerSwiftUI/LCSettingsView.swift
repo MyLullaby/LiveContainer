@@ -47,6 +47,7 @@ struct LCSettingsView: View {
     
     @AppStorage("LCMultitaskMode", store: LCUtils.appGroupUserDefault) var multitaskMode: MultitaskMode = .virtualWindow
     @AppStorage("LCLaunchInMultitaskMode") var launchInMultitaskMode = false
+    @AppStorage("LCMultitaskBottomWindowBar", store: LCUtils.appGroupUserDefault) var bottomWindowBar = false
     @AppStorage("LCDockWidth", store: LCUtils.appGroupUserDefault) var dockWidth: Double = 80
     
     @State var store : Store = .Unknown
@@ -230,6 +231,10 @@ struct LCSettingsView: View {
                         Text("lc.settings.autoLaunchInMultitaskMode".loc)
                     }
                     
+                    Toggle(isOn: $bottomWindowBar) {
+                        Text("lc.settings.bottomWindowBar".loc)
+                    }
+                    
                     if multitaskMode == .virtualWindow {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack {
@@ -334,6 +339,11 @@ struct LCSettingsView: View {
                             exportMainExecutable()
                         } label: {
                             Text("Export Main Executable")
+                        }
+                        Button {
+                            resetSymbolOffsets()
+                        } label: {
+                            Text("Reset Symbol Offsets")
                         }
                         HStack {
                             Text("LiveExec32 .app path")
@@ -522,6 +532,10 @@ struct LCSettingsView: View {
         } catch {
             print("Error copying main executable \(error)")
         }
+    }
+    
+    func resetSymbolOffsets() {
+        LCUtils.appGroupUserDefault.removeObject(forKey: "symbolOffsetCache")
     }
     
     func importCertificate() async {
