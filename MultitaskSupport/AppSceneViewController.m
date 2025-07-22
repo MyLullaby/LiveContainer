@@ -53,10 +53,11 @@
         return nil;
     }
     _extension.preferredLanguages = @[];
+    
     NSExtensionItem *item = [NSExtensionItem new];
     item.userInfo = @{
         @"selected": _bundleId,
-        @"selectedContainer": _dataUUID
+        @"selectedContainer": _dataUUID,
     };
     
     __weak typeof(self) weakSelf = self;
@@ -81,6 +82,8 @@
             [delegate appSceneVC:self didInitializeWithError:error];
         }
     }];
+    
+    
 
     _isNativeWindow = [[[NSUserDefaults alloc] initWithSuiteName:[LCUtils appGroupID]] integerForKey:@"LCMultitaskMode" ] == 1;
 
