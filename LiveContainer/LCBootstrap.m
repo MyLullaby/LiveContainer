@@ -432,10 +432,6 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     // ignore setting handler from guest app
     litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, NSSetUncaughtExceptionHandler, hook_do_nothing, nil);
     
-    // Preload executable to bypass RT_NOLOAD
-    uint32_t appIndex = _dyld_image_count();
-    appMainImageIndex = appIndex;
-    
     DyldHooksInit([guestAppInfo[@"hideLiveContainer"] boolValue], [guestAppInfo[@"spoofSDKVersion"] unsignedIntValue]);
     
     bool is32bit = [guestAppInfo[@"is32bit"] boolValue];
@@ -466,6 +462,8 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
         tweakLoaderLoaded = true;
     }
     
+    // Preload executable to bypass RT_NOLOAD
+    appMainImageIndex = _dyld_image_count();
     void *appHandle = dlopenBypassingLock(appExecPath, RTLD_LAZY|RTLD_GLOBAL|RTLD_FIRST);
     appExecutableHandle = appHandle;
     const char *dlerr = dlerror();
