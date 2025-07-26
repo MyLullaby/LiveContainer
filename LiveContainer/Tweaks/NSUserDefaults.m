@@ -81,6 +81,7 @@ void NUDGuestHooksInit(void) {
     Class ckContainer = NSClassFromString(@"CKContainer");
     swizzle2(ckContainer, @selector(accountStatusWithCompletionHandler:completionHandler:), AppleHook.class, @selector(swizzled_accountStatusWithCompletionHandler:completionHandler:));
     swizzle2(ckContainer, @selector(defaultContainer:), AppleHook.class, @selector(swizzled_defaultContainer:));
+    swizzle2(ckContainer, @selector(containerWithIdentifier:containerIdentifier:), AppleHook.class, @selector(swizzled_containerWithIdentifier:containerIdentifier:));
     
 #pragma clang diagnostic pop
     
