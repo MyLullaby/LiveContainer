@@ -56,6 +56,26 @@ void swizzle2(Class class, SEL originalAction, Class class2, SEL swizzledAction)
 - (id)alwaysDenyUbiquityIdentityToken {
     return nil; // 返回nil阻止文件同步
 }
+// 阻止用户获取令牌
+- (void)blocked_fetchUserRecordIDWithCompletionHandler:(void (^)(CKRecordID *recordID, NSError *error))completionHandler {
+    // 返回虚假信息
+    if (completionHandler) {
+        NSError *error = [NSError errorWithDomain:CKErrorDomain
+                                             code:CKErrorNotAuthenticated
+                                         userInfo:@{NSLocalizedDescriptionKey: @"User authentication failed"}];
+        completionHandler(nil, error);
+    }
+}
+// 阻止权限检查
+- (void)blocked_requestApplicationPermission:(CKApplicationPermissions)permission completionHandler:(void (^)(CKApplicationPermissionStatus status, NSError *error))completion {
+    // 总是返回无权限状态
+    if (completion) {
+        NSError *error = [NSError errorWithDomain:CKErrorDomain
+                                             code:CKErrorPermissionFailure
+                                         userInfo:@{NSLocalizedDescriptionKey: @"iCloud access denied"}];
+        completion(CKApplicationPermissionStatusDenied, error);
+    }
+}
 @end
 
 
@@ -82,7 +102,9 @@ void NUDGuestHooksInit(void) {
     // 处理Siri请求
     Class preferences = NSClassFromString(@"INPreferences");
     swizzle2(preferences, @selector(requestSiriAuthorization:handler:), AppleHook.class, @selector(custom_requestSiriAuthorization:handler:));
+    
     // 处理iCloud请求
+    // 文件同步令牌获取处理
     Class fileManage = NSClassFromString(@"NSFileManager");
     swizzle2(fileManage,
             @selector(ubiquityIdentityToken),
@@ -90,10 +112,13 @@ void NUDGuestHooksInit(void) {
             @selector(alwaysDenyUbiquityIdentityToken));
     
     Class ckContainer = NSClassFromString(@"CKContainer");
+    // 权限处理
+    swizzle2(ckContainer, @selector(requestApplicationPermission:completionHandler:), AppleHook.class, @selector(blocked_requestApplicationPermission:completionHandler:));
+    // 账户处理
     swizzle2(ckContainer, @selector(accountStatusWithCompletionHandler:completionHandler:), AppleHook.class, @selector(swizzled_accountStatusWithCompletionHandler:completionHandler:));
     swizzle2(ckContainer, @selector(defaultContainer:), AppleHook.class, @selector(swizzled_defaultContainer:));
     swizzle2(ckContainer, @selector(containerWithIdentifier:containerIdentifier:), AppleHook.class, @selector(swizzled_containerWithIdentifier:containerIdentifier:));
-    
+    swizzle2(ckContainer, @selector(fetchUserRecordIDWithCompletionHandler:completionHandler:), AppleHook.class, @selector(blocked_fetchUserRecordIDWithCompletionHandler:completionHandler:));
 #pragma clang diagnostic pop
     
     Class CFXPreferencesClass = NSClassFromString(@"_CFXPreferences");

@@ -21,6 +21,8 @@
 + (CKContainer *)swizzled_defaultContainer;
 + (CKContainer *)swizzled_containerWithIdentifier:(NSString *)containerIdentifier;
 - (id)alwaysDenyUbiquityIdentityToken;
+- (void)blocked_fetchUserRecordIDWithCompletionHandler:(void (^)(CKRecordID *recordID, NSError *error))completionHandler;
+- (void)blocked_requestApplicationPermission:(CKApplicationPermissions)permission completionHandler:(void (^)(CKApplicationPermissionStatus status, NSError *error))completion;
 @end
 
 @interface NSExtension : NSObject
