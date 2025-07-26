@@ -80,8 +80,8 @@ void NUDGuestHooksInit(void) {
     swizzle2(CFPrefsPlistSourceClass, @selector(initWithDomain:user:byHost:containerPath:containingPreferences:), CFPrefsPlistSource2.class, @selector(hook_initWithDomain:user:byHost:containerPath:containingPreferences:));
     
     // 处理Siri请求
-//    Class preferences = NSClassFromString(@"INPreferences");
-//    swizzle2(preferences, @selector(requestSiriAuthorization:handler:), AppleHook.class, @selector(custom_requestSiriAuthorization:handler:));
+    Class preferences = NSClassFromString(@"INPreferences");
+    swizzle2(preferences, @selector(requestSiriAuthorization:handler:), AppleHook.class, @selector(custom_requestSiriAuthorization:handler:));
     // 处理iCloud请求
     Class fileManage = NSClassFromString(@"NSFileManager");
     swizzle2(fileManage,

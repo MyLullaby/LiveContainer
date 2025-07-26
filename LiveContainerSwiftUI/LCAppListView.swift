@@ -285,12 +285,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                             Divider()
                             
                             Button {
-                                INPreferences.requestSiriAuthorization { status in
-                                    // 测试一下hook是否生效
-                                    if (status == INSiriAuthorizationStatus.denied) {
-                                        customSortViewPresent = true
-                                    }
-                                }
+                                customSortViewPresent = true
                             } label: {
                                 Label("lc.appList.sort.customManage".loc, systemImage: "slider.horizontal.3")
                             }
