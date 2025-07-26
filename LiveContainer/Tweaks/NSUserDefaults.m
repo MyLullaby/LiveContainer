@@ -52,7 +52,12 @@ void swizzle2(Class class, SEL originalAction, Class class2, SEL swizzledAction)
     NSLog(@"Swizzled swizzled_containerWithIdentifier, denying iCloud access");
     return nil;
 }
+// 阻止文件访问
+- (id)alwaysDenyUbiquityIdentityToken {
+    return nil; // 返回nil阻止文件同步
+}
 @end
+
 
 
 NSURL* appContainerURL = 0;
@@ -78,6 +83,12 @@ void NUDGuestHooksInit(void) {
     Class preferences = NSClassFromString(@"INPreferences");
     swizzle2(preferences, @selector(requestSiriAuthorization:handler:), AppleHook.class, @selector(custom_requestSiriAuthorization:handler:));
     // 处理iCloud请求
+    Class fileManage = NSClassFromString(@"NSFileManager");
+    swizzle2(fileManage,
+            @selector(ubiquityIdentityToken),
+             AppleHook.class,
+            @selector(alwaysDenyUbiquityIdentityToken));
+    
     Class ckContainer = NSClassFromString(@"CKContainer");
     swizzle2(ckContainer, @selector(accountStatusWithCompletionHandler:completionHandler:), AppleHook.class, @selector(swizzled_accountStatusWithCompletionHandler:completionHandler:));
     swizzle2(ckContainer, @selector(defaultContainer:), AppleHook.class, @selector(swizzled_defaultContainer:));

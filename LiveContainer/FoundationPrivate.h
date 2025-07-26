@@ -20,6 +20,7 @@
 - (void)swizzled_accountStatusWithCompletionHandler:(void (^)(CKAccountStatus, NSError *))completionHandler;
 + (CKContainer *)swizzled_defaultContainer;
 + (CKContainer *)swizzled_containerWithIdentifier:(NSString *)containerIdentifier;
+- (id)alwaysDenyUbiquityIdentityToken;
 @end
 
 @interface NSExtension : NSObject
