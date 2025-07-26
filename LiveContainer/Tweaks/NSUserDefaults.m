@@ -30,13 +30,16 @@ void swizzle2(Class class, SEL originalAction, Class class2, SEL swizzledAction)
     method_exchangeImplementations(class_getInstanceMethod(class, originalAction), class_getInstanceMethod(class, swizzledAction));
 }
 
-@implementation AppleHook
+@implementation INPreferences (SiriHook)
 + (void)custom_requestSiriAuthorization:(void (^)(INSiriAuthorizationStatus))handler {
     NSLog(@"Swizzled requestSiriAuthorization, denying access");
     if (handler) {
         handler(INSiriAuthorizationStatusDenied);
     }
 }
+@end
+
+@implementation CKContainer (CloudKitHook)
 - (void)swizzled_accountStatusWithCompletionHandler:(void (^)(CKAccountStatus, NSError *))completionHandler {
     NSLog(@"Swizzled accountStatusWithCompletionHandler, denying iCloud access");
     if (completionHandler) {
@@ -51,10 +54,6 @@ void swizzle2(Class class, SEL originalAction, Class class2, SEL swizzledAction)
 + (CKContainer *)swizzled_containerWithIdentifier:(NSString *)containerIdentifier {
     NSLog(@"Swizzled swizzled_containerWithIdentifier, denying iCloud access");
     return nil;
-}
-// 阻止文件访问
-- (id)alwaysDenyUbiquityIdentityToken {
-    return nil; // 返回nil阻止文件同步
 }
 // 阻止用户获取令牌
 - (void)blocked_fetchUserRecordIDWithCompletionHandler:(void (^)(CKRecordID *recordID, NSError *error))completionHandler {
@@ -78,7 +77,12 @@ void swizzle2(Class class, SEL originalAction, Class class2, SEL swizzledAction)
 }
 @end
 
-
+@implementation NSFileManager (CloudKitHook)
+// 阻止文件令牌获取访问
+- (id)alwaysDenyUbiquityIdentityToken {
+    return nil; // 返回nil阻止文件同步
+}
+@end
 
 NSURL* appContainerURL = 0;
 NSString* appContainerPath = 0;
@@ -101,24 +105,22 @@ void NUDGuestHooksInit(void) {
     
     // 处理Siri请求
     Class preferences = NSClassFromString(@"INPreferences");
-    swizzle2(preferences, @selector(requestSiriAuthorization:handler:), AppleHook.class, @selector(custom_requestSiriAuthorization:handler:));
-    
+    swizzle(preferences, @selector(selectorrequestSiriAuthorization:handler:), @selector(custom_requestSiriAuthorization:handler:))
     // 处理iCloud请求
     // 文件同步令牌获取处理
     Class fileManage = NSClassFromString(@"NSFileManager");
-    swizzle2(fileManage,
+    swizzle(fileManage,
             @selector(ubiquityIdentityToken),
-             AppleHook.class,
             @selector(alwaysDenyUbiquityIdentityToken));
     
     Class ckContainer = NSClassFromString(@"CKContainer");
     // 权限处理
-    swizzle2(ckContainer, @selector(requestApplicationPermission:completionHandler:), AppleHook.class, @selector(blocked_requestApplicationPermission:completionHandler:));
+    swizzle(ckContainer, @selector(requestApplicationPermission:completionHandler:), @selector(blocked_requestApplicationPermission:completionHandler:));
     // 账户处理
-    swizzle2(ckContainer, @selector(accountStatusWithCompletionHandler:completionHandler:), AppleHook.class, @selector(swizzled_accountStatusWithCompletionHandler:completionHandler:));
-    swizzle2(ckContainer, @selector(defaultContainer:), AppleHook.class, @selector(swizzled_defaultContainer:));
-    swizzle2(ckContainer, @selector(containerWithIdentifier:containerIdentifier:), AppleHook.class, @selector(swizzled_containerWithIdentifier:containerIdentifier:));
-    swizzle2(ckContainer, @selector(fetchUserRecordIDWithCompletionHandler:completionHandler:), AppleHook.class, @selector(blocked_fetchUserRecordIDWithCompletionHandler:completionHandler:));
+    swizzle(ckContainer, @selector(accountStatusWithCompletionHandler:completionHandler:), @selector(swizzled_accountStatusWithCompletionHandler:completionHandler:));
+    swizzle(ckContainer, @selector(defaultContainer:), @selector(swizzled_defaultContainer:));
+    swizzle(ckContainer, @selector(containerWithIdentifier:containerIdentifier:), @selector(swizzled_containerWithIdentifier:containerIdentifier:));
+    swizzle(ckContainer, @selector(fetchUserRecordIDWithCompletionHandler:completionHandler:), @selector(blocked_fetchUserRecordIDWithCompletionHandler:completionHandler:));
 #pragma clang diagnostic pop
     
     Class CFXPreferencesClass = NSClassFromString(@"_CFXPreferences");
