@@ -7,8 +7,6 @@
 #include <dlfcn.h>
 #include <stdlib.h>
 #include <sys/mman.h>
-#include <CloudKit/CloudKit.h>
-#include <Intents/Intents.h>
 #import "litehook_internal.h"
 #import "LCMachOUtils.h"
 #import "../utils.h"
@@ -66,28 +64,6 @@ static inline int translateImageIndex(int origin) {
     return origin;
 }
 
-// 拦截 CKContainer 的 accountStatusWithCompletionHandler（iCloud）
-void hooked_accountStatusWithCompletionHandler(id self, SEL _cmd, void (^completionHandler)(CKAccountStatus, NSError *)) {
-    NSLog(@"[LiveContainer] Hooked accountStatusWithCompletionHandler: Forcing iCloud unavailable");
-    NSError *error = [NSError errorWithDomain:CKErrorDomain
-                                         code:CKErrorServiceUnavailable
-                                     userInfo:@{NSLocalizedDescriptionKey: @"iCloud is unavailable"}];
-    if (completionHandler) {
-        completionHandler(CKAccountStatusNoAccount, error);
-    }
-}
-
-// 拦截 NSFileManager 的 URLForUbiquityContainerIdentifier（iCloud Drive）
-NSURL *hooked_URLForUbiquityContainerIdentifier(NSFileManager *self, SEL _cmd, NSString *containerIdentifier) {
-    NSLog(@"[LiveContainer] Hooked URLForUbiquityContainerIdentifier: Blocking iCloud Drive access");
-    return nil;
-}
-
-// 拦截 INPreferences 的 siriAuthorizationStatus（Siri）
-INSiriAuthorizationStatus hooked_siriAuthorizationStatus(id self, SEL _cmd) {
-    NSLog(@"[LiveContainer] Hooked siriAuthorizationStatus: Forcing Siri unavailable");
-    return INSiriAuthorizationStatusDenied;
-}
 
 void* hook_dlsym(void * __handle, const char * __symbol) {
     if(__handle == (void*)RTLD_MAIN_ONLY) {
@@ -361,13 +337,10 @@ void DyldHooksInit(bool hideLiveContainer, uint32_t spoofSDKVersion) {
     }
     orig_dyld_get_image_header = _dyld_get_image_header;
     
-    // 钩子 iCloud 和 Siri 相关函数
-    litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, "-[CKContainer accountStatusWithCompletionHandler:]", hooked_accountStatusWithCompletionHandler, nil);
-    litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, "-[NSFileManager URLForUbiquityContainerIdentifier:]", hooked_URLForUbiquityContainerIdentifier, nil);
-    litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, "+[INPreferences siriAuthorizationStatus]", hooked_siriAuthorizationStatus, nil);
-    
     // hook dlopen and dlsym to solve RTLD_MAIN_ONLY, hook other functions to hide LiveContainer itself
     litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, dlsym, hook_dlsym, nil);
+    // 处理SiriKit的错误
+    
     if(hideLiveContainer) {
         litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, _dyld_image_count, hook_dyld_image_count, nil);
         litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, _dyld_get_image_header, hook_dyld_get_image_header, nil);

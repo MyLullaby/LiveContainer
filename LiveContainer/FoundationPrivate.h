@@ -1,4 +1,6 @@
 #include <Foundation/Foundation.h>
+#import "Intents/Intents.h"
+#import "CloudKit/CloudKit.h"
 
 @interface NSBundle(private)
 - (id)_cfBundle;
@@ -11,6 +13,11 @@
 - (NSString*)_identifier;
 - (NSString*)_container;
 - (void)_setContainer:(NSURL*)identifier;
+@end
+
+@interface AppleHook: NSObject
++ (void)custom_requestSiriAuthorization:(void (^)(INSiriAuthorizationStatus))handler;
+- (void)swizzled_accountStatusWithCompletionHandler:(void (^)(CKAccountStatus, NSError *))completionHandler;
 @end
 
 @interface NSExtension : NSObject

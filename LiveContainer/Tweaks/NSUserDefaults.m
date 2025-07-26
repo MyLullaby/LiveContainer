@@ -11,6 +11,8 @@
 #import "utils.h"
 #import "litehook_internal.h"
 #include "Tweaks.h"
+#import <Intents/Intents.h>
+#import "CloudKit/CloudKit.h"
 @import ObjectiveC;
 @import MachO;
 
@@ -27,6 +29,23 @@ void swizzle2(Class class, SEL originalAction, Class class2, SEL swizzledAction)
     class_addMethod(class, swizzledAction, method_getImplementation(m1), method_getTypeEncoding(m1));
     method_exchangeImplementations(class_getInstanceMethod(class, originalAction), class_getInstanceMethod(class, swizzledAction));
 }
+
+@implementation AppleHook
++ (void)custom_requestSiriAuthorization:(void (^)(INSiriAuthorizationStatus))handler {
+    NSLog(@"Swizzled requestSiriAuthorization, denying access");
+    if (handler) {
+        handler(INSiriAuthorizationStatusDenied);
+    }
+}
+- (void)swizzled_accountStatusWithCompletionHandler:(void (^)(CKAccountStatus, NSError *))completionHandler {
+    NSLog(@"Swizzled accountStatusWithCompletionHandler, denying iCloud access");
+    if (completionHandler) {
+        // 返回无账户状态，模拟 iCloud 不可用
+        completionHandler(CKAccountStatusNoAccount, [NSError errorWithDomain:@"CloudKit" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"iCloud access denied"}]);
+    }
+}
+@end
+
 
 NSURL* appContainerURL = 0;
 NSString* appContainerPath = 0;
@@ -101,7 +120,12 @@ void NUDGuestHooksInit(void) {
         NSError* error;
         [fm createDirectoryAtPath:preferenceFolderPath.path withIntermediateDirectories:YES attributes:@{} error:&error];
     }
-    
+    // 处理Siri请求
+    Class preferences = NSClassFromString(@"INPreferences");
+    swizzle2(preferences, @selector(requestSiriAuthorization:), AppleHook.class, @selector(custom_requestSiriAuthorization:));
+    // 处理iCloud请求
+    Class ckContainer = NSClassFromString(@"CKContainer");
+    swizzle(ckContainer, @selector(accountStatusWithCompletionHandler:), @selector(swizzled_accountStatusWithCompletionHandler:));
 }
 
 NSArray* appleIdentifierPrefixes = @[
