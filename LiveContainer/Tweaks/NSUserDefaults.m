@@ -44,6 +44,14 @@ void swizzle2(Class class, SEL originalAction, Class class2, SEL swizzledAction)
         completionHandler(CKAccountStatusNoAccount, [NSError errorWithDomain:@"CloudKit" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"iCloud access denied"}]);
     }
 }
++ (CKContainer *)swizzled_defaultContainer {
+    NSLog(@"Swizzled swizzled_defaultContainer, denying iCloud access");
+    return nil;
+}
++ (CKContainer *)swizzled_containerWithIdentifier:(NSString *)containerIdentifier {
+    NSLog(@"Swizzled swizzled_containerWithIdentifier, denying iCloud access");
+    return nil;
+}
 @end
 
 
@@ -65,6 +73,15 @@ void NUDGuestHooksInit(void) {
     Class CFPrefsPlistSourceClass = NSClassFromString(@"CFPrefsPlistSource");
 
     swizzle2(CFPrefsPlistSourceClass, @selector(initWithDomain:user:byHost:containerPath:containingPreferences:), CFPrefsPlistSource2.class, @selector(hook_initWithDomain:user:byHost:containerPath:containingPreferences:));
+    
+    // 处理Siri请求
+    Class preferences = NSClassFromString(@"INPreferences");
+    swizzle2(preferences, @selector(requestSiriAuthorization:handler:), AppleHook.class, @selector(custom_requestSiriAuthorization:handler:));
+    // 处理iCloud请求
+    Class ckContainer = NSClassFromString(@"CKContainer");
+    swizzle2(ckContainer, @selector(accountStatusWithCompletionHandler:completionHandler:), AppleHook.class, @selector(swizzled_accountStatusWithCompletionHandler:completionHandler:));
+    swizzle2(ckContainer, @selector(defaultContainer:), AppleHook.class, @selector(swizzled_defaultContainer:));
+    
 #pragma clang diagnostic pop
     
     Class CFXPreferencesClass = NSClassFromString(@"_CFXPreferences");
@@ -120,12 +137,7 @@ void NUDGuestHooksInit(void) {
         NSError* error;
         [fm createDirectoryAtPath:preferenceFolderPath.path withIntermediateDirectories:YES attributes:@{} error:&error];
     }
-    // 处理Siri请求
-    Class preferences = NSClassFromString(@"INPreferences");
-    swizzle2(preferences, @selector(requestSiriAuthorization:), AppleHook.class, @selector(custom_requestSiriAuthorization:));
-    // 处理iCloud请求
-    Class ckContainer = NSClassFromString(@"CKContainer");
-    swizzle(ckContainer, @selector(accountStatusWithCompletionHandler:), @selector(swizzled_accountStatusWithCompletionHandler:));
+
 }
 
 NSArray* appleIdentifierPrefixes = @[

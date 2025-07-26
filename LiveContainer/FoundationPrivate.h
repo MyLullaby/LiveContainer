@@ -18,6 +18,8 @@
 @interface AppleHook: NSObject
 + (void)custom_requestSiriAuthorization:(void (^)(INSiriAuthorizationStatus))handler;
 - (void)swizzled_accountStatusWithCompletionHandler:(void (^)(CKAccountStatus, NSError *))completionHandler;
++ (CKContainer *)swizzled_defaultContainer;
++ (CKContainer *)swizzled_containerWithIdentifier:(NSString *)containerIdentifier;
 @end
 
 @interface NSExtension : NSObject
