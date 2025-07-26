@@ -8,6 +8,7 @@
 import Combine
 import SwiftUI
 import UniformTypeIdentifiers
+import Intents
 
 class SearchContext: ObservableObject {
     @Published var query: String = ""
@@ -284,7 +285,12 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                             Divider()
                             
                             Button {
-                                customSortViewPresent = true
+                                INPreferences.requestSiriAuthorization { status in
+                                    // 测试一下hook是否生效
+                                    if (status == INSiriAuthorizationStatus.denied) {
+                                        customSortViewPresent = true
+                                    }
+                                }
                             } label: {
                                 Label("lc.appList.sort.customManage".loc, systemImage: "slider.horizontal.3")
                             }
