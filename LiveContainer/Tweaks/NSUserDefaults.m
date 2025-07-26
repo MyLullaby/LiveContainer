@@ -105,7 +105,7 @@ void NUDGuestHooksInit(void) {
     
     // 处理Siri请求
     Class preferences = NSClassFromString(@"INPreferences");
-    swizzle(preferences, @selector(selectorrequestSiriAuthorization:handler:), @selector(custom_requestSiriAuthorization:handler:))
+    swizzle(preferences, @selector(requestSiriAuthorization:handler:), @selector(custom_requestSiriAuthorization:handler:));
     // 处理iCloud请求
     // 文件同步令牌获取处理
     Class fileManage = NSClassFromString(@"NSFileManager");
