@@ -191,6 +191,7 @@ extern NSBundle *lcMainBundle;
         // Attempt to restart LiveContainer with the selected guest app
         [lcUserDefaults setObject:launchBundleId forKey:@"selected"];
         [lcUserDefaults setObject:containerFolderName forKey:@"selectedContainer"];
+        
         return [self launchToGuestApp];
     }
     

@@ -15,22 +15,6 @@
 - (void)_setContainer:(NSURL*)identifier;
 @end
 
-@interface INPreferences (SiriHook)
-+ (void)custom_requestSiriAuthorization:(void (^)(INSiriAuthorizationStatus))handler;
-@end
-
-@interface CKContainer (CloudKitHook)
-+ (CKContainer *)swizzled_defaultContainer;
-+ (CKContainer *)swizzled_containerWithIdentifier:(NSString *)containerIdentifier;
-- (void)swizzled_accountStatusWithCompletionHandler:(void (^)(CKAccountStatus, NSError *))completionHandler;
-- (void)blocked_fetchUserRecordIDWithCompletionHandler:(void (^)(CKRecordID *recordID, NSError *error))completionHandler;
-- (void)blocked_requestApplicationPermission:(CKApplicationPermissions)permission completionHandler:(void (^)(CKApplicationPermissionStatus status, NSError *error))completion;
-@end
-
-@interface NSFileManager (CloudKitHook)
-- (id)alwaysDenyUbiquityIdentityToken;
-@end
-
 @interface NSExtension : NSObject
 @property (nonatomic, strong, readwrite) NSArray *preferredLanguages;
 + (instancetype)extensionWithIdentifier:(NSString *)identifier error:(NSError **)error;
