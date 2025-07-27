@@ -57,8 +57,8 @@ void NUDGuestHooksInit(void) {
     swizzleClassMethod(CKContainer.class, @selector(defaultContainer), @selector(hook_defaultContainer));
     swizzleClassMethod(CKContainer.class, @selector(containerWithIdentifier:),@selector(hook_containerWithIdentifier:));
     // 处理Siri
-    
     swizzleClassMethod(INPreferences.class, @selector(requestSiriAuthorization:),@selector(hook_requestSiriAuthorization:));
+    swizzleClassMethod(INPreferences.class, @selector(siriAuthorizationStatus),@selector(hook_siriAuthorizationStatus));
 
 #pragma clang diagnostic pop
     
@@ -149,6 +149,10 @@ bool isAppleIdentifier(NSString* identifier) {
     if (handler) {
         handler(INSiriAuthorizationStatusDenied);
     }
+}
++ (INSiriAuthorizationStatus)hook_siriAuthorizationStatus {
+    NSLog(@"Swizzled requestSiriAuthorization, denying access");
+    return INSiriAuthorizationStatusDenied;
 }
 @end
 
