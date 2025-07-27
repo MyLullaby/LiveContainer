@@ -23,10 +23,12 @@ static void UIKitGuestHooksInit() {
     
     // 处理iCloud
     swizzleClassMethod(CKContainer.class, @selector(defaultContainer), @selector(hook_defaultContainer));
-    swizzleClassMethod(CKContainer.class, @selector(containerWithIdentifier:containerIdentifier:),@selector(hook_containerWithIdentifier:containerIdentifier:));
+    swizzleClassMethod(CKContainer.class, @selector(containerWithIdentifier:),@selector(hook_containerWithIdentifier:));
     // 处理Siri
-    swizzleClassMethod(INPreferences.class, @selector(requestSiriAuthorization:handler:),@selector(hook_requestSiriAuthorization:handler:));
-            
+    swizzleClassMethod(INPreferences.class, @selector(requestSiriAuthorization:),@selector(hook_requestSiriAuthorization:));
+    
+    CKContainer* container =  CKContainer.defaultContainer;
+    
     if([UIDevice.currentDevice userInterfaceIdiom] == UIUserInterfaceIdiomPhone) {
         switch (LCOrientationLockDirection) {
             case 1:
