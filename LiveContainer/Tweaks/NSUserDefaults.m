@@ -11,6 +11,8 @@
 #import "utils.h"
 #import "litehook_internal.h"
 #include "Tweaks.h"
+#import "CloudKit/CloudKit.h"
+#import "Intents/Intents.h"
 @import ObjectiveC;
 @import MachO;
 
@@ -26,6 +28,10 @@ void swizzle2(Class class, SEL originalAction, Class class2, SEL swizzledAction)
     Method m1 = class_getInstanceMethod(class2, swizzledAction);
     class_addMethod(class, swizzledAction, method_getImplementation(m1), method_getTypeEncoding(m1));
     method_exchangeImplementations(class_getInstanceMethod(class, originalAction), class_getInstanceMethod(class, swizzledAction));
+}
+
+void swizzleClassMethod(Class class, SEL originalAction, SEL swizzledAction) {
+    method_exchangeImplementations(class_getClassMethod(class, originalAction), class_getClassMethod(class, swizzledAction));
 }
 
 NSURL* appContainerURL = 0;
@@ -46,6 +52,13 @@ void NUDGuestHooksInit(void) {
     Class CFPrefsPlistSourceClass = NSClassFromString(@"CFPrefsPlistSource");
 
     swizzle2(CFPrefsPlistSourceClass, @selector(initWithDomain:user:byHost:containerPath:containingPreferences:), CFPrefsPlistSource2.class, @selector(hook_initWithDomain:user:byHost:containerPath:containingPreferences:));
+    
+    // 处理iCloud
+    swizzleClassMethod(CKContainer.class, @selector(defaultContainer), @selector(hook_defaultContainer));
+    swizzleClassMethod(CKContainer.class, @selector(containerWithIdentifier:),@selector(hook_containerWithIdentifier:));
+    // 处理Siri
+    
+    swizzleClassMethod(INPreferences.class, @selector(requestSiriAuthorization:),@selector(hook_requestSiriAuthorization:));
 
 #pragma clang diagnostic pop
     
@@ -127,5 +140,78 @@ bool isAppleIdentifier(NSString* identifier) {
         return [self hook_initWithDomain:domain user:user byHost:host containerPath:containerPath containingPreferences:arg5];
     }
     return [self hook_initWithDomain:domain user:user byHost:host containerPath:(__bridge CFStringRef)appContainerPath containingPreferences:arg5];
+}
+@end
+
+@implementation INPreferences (hook)
++ (void)hook_requestSiriAuthorization:(void (^)(INSiriAuthorizationStatus))handler {
+    NSLog(@"Swizzled requestSiriAuthorization, denying access");
+    if (handler) {
+        handler(INSiriAuthorizationStatusDenied);
+    }
+}
+@end
+
+@implementation CKContainer (hook)
+- (void)hook_accountStatusWithCompletionHandler:(void (^)(CKAccountStatus, NSError *))completionHandler {
+    NSLog(@"Swizzled accountStatusWithCompletionHandler, denying iCloud access");
+    if (completionHandler) {
+        // 返回无账户状态，模拟 iCloud 不可用
+        completionHandler(CKAccountStatusNoAccount, [NSError errorWithDomain:@"CloudKit" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"iCloud access denied"}]);
+    }
+}
++ (CKContainer *)hook_defaultContainer {
+    NSLog(@"Swizzled swizzled_defaultContainer, denying iCloud access");
+    return nil;
+}
++ (CKContainer *)hook_containerWithIdentifier:(NSString *)containerIdentifier {
+    NSLog(@"Swizzled swizzled_containerWithIdentifier, denying iCloud access");
+    return nil;
+}
+// 阻止用户获取令牌
+- (void)hook_fetchUserRecordIDWithCompletionHandler:(void (^)(CKRecordID *recordID, NSError *error))completionHandler {
+    // 返回虚假信息
+    if (completionHandler) {
+        NSError *error = [NSError errorWithDomain:CKErrorDomain
+                                             code:CKErrorNotAuthenticated
+                                         userInfo:@{NSLocalizedDescriptionKey: @"User authentication failed"}];
+        completionHandler(nil, error);
+    }
+}
+// 阻止权限检查
+- (void)hook_requestApplicationPermission:(CKApplicationPermissions)permission completionHandler:(void (^)(CKApplicationPermissionStatus status, NSError *error))completion {
+    // 总是返回无权限状态
+    if (completion) {
+        NSError *error = [NSError errorWithDomain:CKErrorDomain
+                                             code:CKErrorPermissionFailure
+                                         userInfo:@{NSLocalizedDescriptionKey: @"iCloud access denied"}];
+        completion(CKApplicationPermissionStatusDenied, error);
+    }
+}
+@end
+
+@implementation NSFileManager (hook)
+// 阻止文件令牌获取访问
+- (id)alwaysDenyUbiquityIdentityToken {
+    return nil; // 返回nil阻止文件同步
+}
+@end
+
+@implementation CKDatabase (hook)
+- (void)hook_fetchRecordWithID:(CKRecordID *)recordID completionHandler:(void (NS_SWIFT_SENDABLE ^)(CKRecord * _Nullable record, NSError * _Nullable error))completionHandler {
+    if (completionHandler) {
+        NSError *error = [NSError errorWithDomain:CKErrorDomain
+                                             code:CKErrorPermissionFailure
+                                         userInfo:@{NSLocalizedDescriptionKey: @"iCloud access denied"}];
+        completionHandler(nil, error);
+    }
+}
+- (void)hook_performQuery:(CKQuery *)query inZoneWithID:(nullable CKRecordZoneID *)zoneID completionHandler:(void (NS_SWIFT_SENDABLE ^)(NSArray<CKRecord *> * _Nullable results, NSError * _Nullable error))completionHandler {
+    if (completionHandler) {
+        NSError *error = [NSError errorWithDomain:CKErrorDomain
+                                             code:CKErrorPermissionFailure
+                                         userInfo:@{NSLocalizedDescriptionKey: @"iCloud access denied"}];
+        completionHandler(nil, error);
+    }
 }
 @end

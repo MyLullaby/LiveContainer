@@ -4,8 +4,6 @@
 #import "utils.h"
 #import <LocalAuthentication/LocalAuthentication.h>
 #import "Localization.h"
-#import "CloudKit/CloudKit.h"
-#import "Intents/Intents.h"
 
 UIInterfaceOrientation LCOrientationLock = UIInterfaceOrientationUnknown;
 NSMutableArray<NSString*>* LCSupportedUrlSchemes = nil;
@@ -20,14 +18,6 @@ static void UIKitGuestHooksInit() {
     swizzle(UIScene.class, @selector(scene:didReceiveActions:fromTransitionContext:), @selector(hook_scene:didReceiveActions:fromTransitionContext:));
     swizzle(UIScene.class, @selector(openURL:options:completionHandler:), @selector(hook_openURL:options:completionHandler:));
     NSInteger LCOrientationLockDirection = [NSUserDefaults.guestAppInfo[@"LCOrientationLock"] integerValue];
-    
-    // 处理iCloud
-    swizzleClassMethod(CKContainer.class, @selector(defaultContainer), @selector(hook_defaultContainer));
-    swizzleClassMethod(CKContainer.class, @selector(containerWithIdentifier:),@selector(hook_containerWithIdentifier:));
-    // 处理Siri
-    swizzleClassMethod(INPreferences.class, @selector(requestSiriAuthorization:),@selector(hook_requestSiriAuthorization:));
-    
-    CKContainer* container =  CKContainer.defaultContainer;
     
     if([UIDevice.currentDevice userInterfaceIdiom] == UIUserInterfaceIdiomPhone) {
         switch (LCOrientationLockDirection) {
@@ -587,79 +577,6 @@ BOOL canAppOpenItself(NSURL* url) {
             self.windowScene = windowScene;
             break;
         }
-    }
-}
-@end
-
-@implementation INPreferences (hook)
-+ (void)hook_requestSiriAuthorization:(void (^)(INSiriAuthorizationStatus))handler {
-    NSLog(@"Swizzled requestSiriAuthorization, denying access");
-    if (handler) {
-        handler(INSiriAuthorizationStatusDenied);
-    }
-}
-@end
-
-@implementation CKContainer (hook)
-- (void)hook_accountStatusWithCompletionHandler:(void (^)(CKAccountStatus, NSError *))completionHandler {
-    NSLog(@"Swizzled accountStatusWithCompletionHandler, denying iCloud access");
-    if (completionHandler) {
-        // 返回无账户状态，模拟 iCloud 不可用
-        completionHandler(CKAccountStatusNoAccount, [NSError errorWithDomain:@"CloudKit" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"iCloud access denied"}]);
-    }
-}
-+ (CKContainer *)hook_defaultContainer {
-    NSLog(@"Swizzled swizzled_defaultContainer, denying iCloud access");
-    return nil;
-}
-+ (CKContainer *)hook_containerWithIdentifier:(NSString *)containerIdentifier {
-    NSLog(@"Swizzled swizzled_containerWithIdentifier, denying iCloud access");
-    return nil;
-}
-// 阻止用户获取令牌
-- (void)hook_fetchUserRecordIDWithCompletionHandler:(void (^)(CKRecordID *recordID, NSError *error))completionHandler {
-    // 返回虚假信息
-    if (completionHandler) {
-        NSError *error = [NSError errorWithDomain:CKErrorDomain
-                                             code:CKErrorNotAuthenticated
-                                         userInfo:@{NSLocalizedDescriptionKey: @"User authentication failed"}];
-        completionHandler(nil, error);
-    }
-}
-// 阻止权限检查
-- (void)hook_requestApplicationPermission:(CKApplicationPermissions)permission completionHandler:(void (^)(CKApplicationPermissionStatus status, NSError *error))completion {
-    // 总是返回无权限状态
-    if (completion) {
-        NSError *error = [NSError errorWithDomain:CKErrorDomain
-                                             code:CKErrorPermissionFailure
-                                         userInfo:@{NSLocalizedDescriptionKey: @"iCloud access denied"}];
-        completion(CKApplicationPermissionStatusDenied, error);
-    }
-}
-@end
-
-@implementation NSFileManager (hook)
-// 阻止文件令牌获取访问
-- (id)alwaysDenyUbiquityIdentityToken {
-    return nil; // 返回nil阻止文件同步
-}
-@end
-
-@implementation CKDatabase (hook)
-- (void)hook_fetchRecordWithID:(CKRecordID *)recordID completionHandler:(void (NS_SWIFT_SENDABLE ^)(CKRecord * _Nullable record, NSError * _Nullable error))completionHandler {
-    if (completionHandler) {
-        NSError *error = [NSError errorWithDomain:CKErrorDomain
-                                             code:CKErrorPermissionFailure
-                                         userInfo:@{NSLocalizedDescriptionKey: @"iCloud access denied"}];
-        completionHandler(nil, error);
-    }
-}
-- (void)hook_performQuery:(CKQuery *)query inZoneWithID:(nullable CKRecordZoneID *)zoneID completionHandler:(void (NS_SWIFT_SENDABLE ^)(NSArray<CKRecord *> * _Nullable results, NSError * _Nullable error))completionHandler {
-    if (completionHandler) {
-        NSError *error = [NSError errorWithDomain:CKErrorDomain
-                                             code:CKErrorPermissionFailure
-                                         userInfo:@{NSLocalizedDescriptionKey: @"iCloud access denied"}];
-        completionHandler(nil, error);
     }
 }
 @end

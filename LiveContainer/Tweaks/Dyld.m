@@ -339,7 +339,6 @@ void DyldHooksInit(bool hideLiveContainer, uint32_t spoofSDKVersion) {
     
     // hook dlopen and dlsym to solve RTLD_MAIN_ONLY, hook other functions to hide LiveContainer itself
     litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, dlsym, hook_dlsym, nil);
-    // 处理SiriKit的错误
     
     if(hideLiveContainer) {
         litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, _dyld_image_count, hook_dyld_image_count, nil);
