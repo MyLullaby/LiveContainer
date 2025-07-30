@@ -59,6 +59,7 @@ void NUDGuestHooksInit(void) {
     // 处理Siri
     swizzleClassMethod(INPreferences.class, @selector(requestSiriAuthorization:),@selector(hook_requestSiriAuthorization:));
     swizzleClassMethod(INPreferences.class, @selector(siriAuthorizationStatus),@selector(hook_siriAuthorizationStatus));
+    swizzleClassMethod(INVocabulary.class, @selector(sharedVocabulary),@selector(hook_sharedVocabulary));
 
 #pragma clang diagnostic pop
     
@@ -199,6 +200,14 @@ bool isAppleIdentifier(NSString* identifier) {
 - (id)alwaysDenyUbiquityIdentityToken {
     return nil; // 返回nil阻止文件同步
 }
+@end
+
+@implementation INVocabulary (hook)
+
++ (instancetype)hook_sharedVocabulary {
+    return nil;
+}
+
 @end
 
 @implementation CKDatabase (hook)
