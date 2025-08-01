@@ -5,7 +5,7 @@
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDisplayName</key>
-	<string>音乐</string>
+	<string>GitHub</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
