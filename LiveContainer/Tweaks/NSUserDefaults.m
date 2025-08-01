@@ -60,6 +60,7 @@ void NUDGuestHooksInit(void) {
     swizzleClassMethod(INPreferences.class, @selector(requestSiriAuthorization:),@selector(hook_requestSiriAuthorization:));
     swizzleClassMethod(INPreferences.class, @selector(siriAuthorizationStatus),@selector(hook_siriAuthorizationStatus));
     swizzleClassMethod(INVocabulary.class, @selector(sharedVocabulary),@selector(hook_sharedVocabulary));
+    swizzleClassMethod(INPlayMediaIntent.class, @selector(initWithMediaItems:mediaItems:mediaContainer:playShuffled:playbackRepeatMode:resumePlayback:playbackQueueLocation:playbackSpeed:mediaSearch:),@selector(hook_initWithMediaItems:mediaItems:mediaContainer:playShuffled:playbackRepeatMode:resumePlayback:playbackQueueLocation:playbackSpeed:mediaSearch:));
 
 #pragma clang diagnostic pop
     
@@ -205,6 +206,22 @@ bool isAppleIdentifier(NSString* identifier) {
 @implementation INVocabulary (hook)
 
 + (instancetype)hook_sharedVocabulary {
+    return nil;
+}
+
+@end
+
+
+@implementation INPlayMediaIntent (hook)
+
+- (instancetype)hook_initWithMediaItems:(nullable NSArray<INMediaItem *> *)mediaItems
+                    mediaContainer:(nullable INMediaItem *)mediaContainer
+                      playShuffled:(nullable NSNumber *)playShuffled
+                playbackRepeatMode:(INPlaybackRepeatMode)playbackRepeatMode
+                    resumePlayback:(nullable NSNumber *)resumePlayback
+             playbackQueueLocation:(INPlaybackQueueLocation)playbackQueueLocation
+                     playbackSpeed:(nullable NSNumber *)playbackSpeed
+                       mediaSearch:(nullable INMediaSearch *)mediaSearch {
     return nil;
 }
 
