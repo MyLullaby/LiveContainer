@@ -9,7 +9,7 @@
 #import "LCMachOUtils.h"
 #import "LCSharedUtils.h"
 #import "utils.h"
-#import "litehook_internal.h"
+#import "../../litehook/src/litehook.h"
 #include "Tweaks.h"
 #import "CloudKit/CloudKit.h"
 #import "Intents/Intents.h"
