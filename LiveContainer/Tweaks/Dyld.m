@@ -138,6 +138,7 @@ void* getCachedSymbol(NSString* symbolName, mach_header_u* header) {
     if(!uuid || memcmp(uuid, [cachedSymbolUUID bytes], 16)) {
         return NULL;
     }
+    
     return (void*)header + [symbolOffsetDict[@"offset"] unsignedLongLongValue];
 }
 
@@ -146,9 +147,10 @@ void saveCachedSymbol(NSString* symbolName, mach_header_u* header, uint64_t offs
     if(!allSymbolOffsetDict) {
         allSymbolOffsetDict = [[NSMutableDictionary alloc] init];
     }
+    
     allSymbolOffsetDict[symbolName] = @{
         @"uuid": [NSData dataWithBytes:LCGetMachOUUID(header) length:16],
-        @"offset": @(offset)
+        @"offset": @(offset),
     };
     [NSUserDefaults.lcSharedDefaults setObject:allSymbolOffsetDict forKey:@"symbolOffsetCache"];
 }
