@@ -62,10 +62,18 @@ NSString* findDefaultContainerWithBundleId(NSString* bundleId) {
 
 void LCShowSwitchAppConfirmation(NSURL *url, NSString* bundleId, bool isSharedApp) {
     NSURLComponents* newUrlComp = [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
-    newUrlComp.scheme = @"livecontainer2";
     
     BOOL canOpenInLC2 = isSharedApp && [NSUserDefaults.lcAppUrlScheme isEqualToString:@"livecontainer"] && [UIApplication.sharedApplication canOpenURL:[NSURL URLWithString: @"livecontainer2://"]];
     if(canOpenInLC2 && ![NSClassFromString(@"LCSharedUtils") isLCSchemeInUse:@"livecontainer2"]) {
+        newUrlComp.scheme = @"livecontainer2";
+        [UIApplication.sharedApplication openURL:newUrlComp.URL options:@{} completionHandler:nil];
+        return;
+    }
+    
+    
+    BOOL canOpenInLC3 = isSharedApp && [NSUserDefaults.lcAppUrlScheme isEqualToString:@"livecontainer"] && [UIApplication.sharedApplication canOpenURL:[NSURL URLWithString: @"livecontainer3://"]];
+    if(canOpenInLC2 && ![NSClassFromString(@"LCSharedUtils") isLCSchemeInUse:@"livecontainer3"]) {
+        newUrlComp.scheme = @"livecontainer3";
         [UIApplication.sharedApplication openURL:newUrlComp.URL options:@{} completionHandler:nil];
         return;
     }
@@ -86,6 +94,16 @@ void LCShowSwitchAppConfirmation(NSURL *url, NSString* bundleId, bool isSharedAp
     [alert addAction:okAction];
     if(canOpenInLC2) {
         UIAlertAction* openlc2Action = [UIAlertAction actionWithTitle:@"lc.guestTweak.openInLc2".loc style:UIAlertActionStyleDefault handler:^(UIAlertAction * action) {
+            newUrlComp.scheme = @"livecontainer2";
+            [UIApplication.sharedApplication openURL:newUrlComp.URL options:@{} completionHandler:nil];
+            window.windowScene = nil;
+        }];
+        [alert addAction:openlc2Action];
+    }
+    
+    if(canOpenInLC3) {
+        UIAlertAction* openlc2Action = [UIAlertAction actionWithTitle:@"从第三个LiveContainer打开".loc style:UIAlertActionStyleDefault handler:^(UIAlertAction * action) {
+            newUrlComp.scheme = @"livecontainer3";
             [UIApplication.sharedApplication openURL:newUrlComp.URL options:@{} completionHandler:nil];
             window.windowScene = nil;
         }];
@@ -160,10 +178,18 @@ void LCOpenWebPage(NSString* webPageUrlString, NSString* originalUrl) {
     }
     
     NSURLComponents* newUrlComp = [NSURLComponents componentsWithString:originalUrl];
-    newUrlComp.scheme = @"livecontainer2";
+    
     
     BOOL canOpenInLC2 = [NSUserDefaults.lcAppUrlScheme isEqualToString:@"livecontainer"] && [UIApplication.sharedApplication canOpenURL:[NSURL URLWithString: @"livecontainer2://"]];
     if(canOpenInLC2 && ![NSClassFromString(@"LCSharedUtils") isLCSchemeInUse:@"livecontainer2"]) {
+        newUrlComp.scheme = @"livecontainer2";
+        [UIApplication.sharedApplication openURL:newUrlComp.URL options:@{} completionHandler:nil];
+        return;
+    }
+    
+    BOOL canOpenInLC3 = [NSUserDefaults.lcAppUrlScheme isEqualToString:@"livecontainer"] && [UIApplication.sharedApplication canOpenURL:[NSURL URLWithString: @"livecontainer3://"]];
+    if(canOpenInLC3 && ![NSClassFromString(@"LCSharedUtils") isLCSchemeInUse:@"livecontainer3"]) {
+        newUrlComp.scheme = @"livecontainer3";
         [UIApplication.sharedApplication openURL:newUrlComp.URL options:@{} completionHandler:nil];
         return;
     }
@@ -182,6 +208,16 @@ void LCOpenWebPage(NSString* webPageUrlString, NSString* originalUrl) {
     }];
     if(canOpenInLC2) {
         UIAlertAction* openlc2Action = [UIAlertAction actionWithTitle:@"lc.guestTweak.openInLc2".loc style:UIAlertActionStyleDefault handler:^(UIAlertAction * action) {
+            newUrlComp.scheme = @"livecontainer2";
+            [UIApplication.sharedApplication openURL:newUrlComp.URL options:@{} completionHandler:nil];
+            window.windowScene = nil;
+        }];
+        [alert addAction:openlc2Action];
+    }
+    
+    if(canOpenInLC3) {
+        UIAlertAction* openlc2Action = [UIAlertAction actionWithTitle:@"从第三个LiveContainer打开".loc style:UIAlertActionStyleDefault handler:^(UIAlertAction * action) {
+            newUrlComp.scheme = @"livecontainer3";
             [UIApplication.sharedApplication openURL:newUrlComp.URL options:@{} completionHandler:nil];
             window.windowScene = nil;
         }];

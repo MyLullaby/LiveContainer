@@ -61,7 +61,7 @@ struct LCPath {
 class SharedModel: ObservableObject {
     @Published var isHiddenAppUnlocked = false
     @Published var developerMode = false
-    // 0= not installed, 1= is installed, 2=current liveContainer is the second one
+    // 0= not installed, 1= is installed, 2=current liveContainer is the another one 3= third is installed
     @Published var multiLCStatus = 0
     @Published var isJITModalOpen = false
     
@@ -98,6 +98,8 @@ class SharedModel: ObservableObject {
             multiLCStatus = 2
         } else if UIApplication.shared.canOpenURL(URL(string: "livecontainer2://")!) {
             multiLCStatus = 1
+        } else if UIApplication.shared.canOpenURL(URL(string: "livecontainer3://")!) {
+            multiLCStatus = 3
         } else {
             multiLCStatus = 0
         }
