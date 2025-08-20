@@ -914,6 +914,9 @@ extension LCUtils {
                 case 2:
                     launchURL = URL(string: "livecontainer://open-url?url=\(encodedStr)")!
                     break
+                case 3:
+                    launchURL = URL(string: "livecontainer3://open-url?url=\(encodedStr)")!
+                    break
                 default:
                     onServerMessage?("Unable to determine multiple LiveContainer status. This should not happen.")
                     return false

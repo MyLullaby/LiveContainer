@@ -21,6 +21,7 @@ int dyld_get_program_sdk_version(void);
 
 + (void)validateJITLessSetupWithCompletionHandler:(void (^)(BOOL success, NSError *error))completionHandler;
 + (NSURL *)archiveIPAWithBundleName:(NSString*)newBundleName error:(NSError **)error;
++ (NSURL *)archiveIPA2WithBundleName:(NSString*)newBundleName error:(NSError **)error;
 + (NSData *)certificateData;
 + (NSString *)certificatePassword;
 

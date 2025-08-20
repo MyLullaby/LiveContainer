@@ -142,6 +142,35 @@ struct LCSettingsView: View {
                         Text("lc.settings.multiLCDesc".loc)
                     }
                 }
+                if (store != .Unknown && store != .ADP) || LCUtils.isAppGroupAltStoreLike() {
+                    Section{
+                        Button {
+                            Task { await installThirdLC() }
+                        } label: {
+                            if sharedModel.multiLCStatus == 0 {
+                                Text("安装第三个LiveContainer")
+                            } else if sharedModel.multiLCStatus == 1 {
+                                Text("重新安装第三个LiveContainer")
+                            } else if sharedModel.multiLCStatus == 2 {
+                                Text("这是第三个LiveContainer")
+                            }
+                            
+                        }
+                        .disabled(sharedModel.multiLCStatus == 2)
+                        
+                        if(sharedModel.multiLCStatus == 2) {
+                            NavigationLink {
+                                LCJITLessDiagnoseView()
+                            } label: {
+                                Text("lc.settings.jitlessDiagnose".loc)
+                            }
+                        }
+                    } header: {
+                        Text("lc.settings.multiLC".loc)
+                    } footer: {
+                        Text("lc.settings.multiLCDesc".loc)
+                    }
+                }
                 Section {
                     if JITEnabler == .SideJITServer || JITEnabler == .JITStreamerEBLegacy {
                         HStack {
@@ -479,6 +508,37 @@ struct LCSettingsView: View {
         
         do {
             let packedIpaUrl = try LCUtils.archiveIPA(withBundleName: "LiveContainer2")
+            
+            shareURL = packedIpaUrl
+            
+            if(result == 2) {
+                let launchURLStr = packedIpaUrl.absoluteString
+                UserDefaults.standard.setValue(launchURLStr, forKey: "launchAppUrlScheme")
+                LCUtils.openSideStore()
+                return
+            }
+            
+            showShareSheet = true
+            
+        } catch {
+            errorInfo = error.localizedDescription
+            errorShow = true
+        }
+    }
+    
+    func installThirdLC() async {
+        if !LCUtils.isAppGroupAltStoreLike() {
+            errorInfo = "lc.settings.unsupportedInstallMethod".loc
+            errorShow = true
+            return;
+        }
+        
+        guard let result = await installLC2Alert.open(), result != 0 else {
+            return
+        }
+        
+        do {
+            let packedIpaUrl = try LCUtils.archiveIPA2(withBundleName: "LiveContainer3")
             
             shareURL = packedIpaUrl
             
