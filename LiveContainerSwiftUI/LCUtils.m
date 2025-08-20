@@ -470,7 +470,7 @@ Class LCSharedUtilsClass = nil;
     NSMutableDictionary *infoDict = [NSMutableDictionary dictionaryWithContentsOfURL:infoPath];
     if (!infoDict) return nil;
 
-    infoDict[@"CFBundleDisplayName"] = @"播客";
+    infoDict[@"CFBundleDisplayName"] = @"视频";
     infoDict[@"CFBundleName"] = newBundleName;
     infoDict[@"CFBundleIdentifier"] = [NSString stringWithFormat:@"com.kdt.%@", newBundleName];
     infoDict[@"CFBundleURLTypes"][0][@"CFBundleURLSchemes"][0] = [newBundleName lowercaseString];
