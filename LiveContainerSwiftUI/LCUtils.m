@@ -478,17 +478,17 @@ Class LCSharedUtilsClass = nil;
         [infoDict[@"CFBundleURLTypes"] removeLastObject];
     }
     [infoDict removeObjectForKey:@"UTExportedTypeDeclarations"];
-    infoDict[@"CFBundleIconName"] = @"ThirdIcon";
+    infoDict[@"CFBundleIconName"] = @"AppIconThird";
     if (infoDict[@"CFBundleIcons"][@"CFBundlePrimaryIcon"][@"CFBundleIconName"]) {
-        infoDict[@"CFBundleIcons"][@"CFBundlePrimaryIcon"][@"CFBundleIconName"] = @"ThirdIcon";
+        infoDict[@"CFBundleIcons"][@"CFBundlePrimaryIcon"][@"CFBundleIconName"] = @"AppIconThird";
     }
-    infoDict[@"CFBundleIcons"][@"CFBundlePrimaryIcon"][@"CFBundleIconFiles"][0] = @"ThirdIcon60x60";
+    infoDict[@"CFBundleIcons"][@"CFBundlePrimaryIcon"][@"CFBundleIconFiles"][0] = @"AppIconThird60x60";
     
     if (infoDict[@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconName"]) {
-        infoDict[@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconName"] = @"ThirdIcon";
+        infoDict[@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconName"] = @"AppIconThird";
     }
-    infoDict[@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconFiles"][0] = @"ThirdIcon60x60";
-    infoDict[@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconFiles"][1] = @"ThirdIcon76x76";
+    infoDict[@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconFiles"][0] = @"AppIconThird60x60";
+    infoDict[@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconFiles"][1] = @"AppIconThird76x76";
     
     // reset a executable name so they don't look the same on the log
     NSURL* appBundlePath = [tmpPayloadPath URLByAppendingPathComponent:@"App.app"];
