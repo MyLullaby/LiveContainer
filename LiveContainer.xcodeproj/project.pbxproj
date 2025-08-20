@@ -149,6 +149,8 @@
 			membershipExceptions = (
 				"AppIconGrey60x60@2x.png",
 				"AppIconGrey76x76@2x~ipad.png",
+				"AppIconThird60x60@2x.png",
+				"AppIconThird76x76@2x~ipad.png",
 				Assets.xcassets,
 				DefaultIcon.png,
 				Localizable.xcstrings,
