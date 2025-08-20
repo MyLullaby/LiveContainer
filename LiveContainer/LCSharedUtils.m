@@ -219,7 +219,12 @@ extern NSBundle *lcMainBundle;
         return NO;
     }
     
-    uint64_t val57 = [info[lc] longLongValue];
+    NSNumber* num57 = info[lc];
+    if(![num57 isKindOfClass:NSNumber.class]) {
+        return NO;
+    }
+    
+    uint64_t val57 = [num57 longLongValue];
     audit_token_t token;
     token.val[5] = val57 >> 32;
     token.val[7] = val57 & 0xffffffff;
@@ -323,7 +328,7 @@ extern NSBundle *lcMainBundle;
     
 }
 
-+ (NSBundle*)findBundleWithBundleId:(NSString*)bundleId {
++ (NSBundle*)findBundleWithBundleId:(NSString*)bundleId isSharedAppOut:(bool*)isSharedAppOut {
     NSString *docPath = [NSString stringWithFormat:@"%s/Documents", getenv("LC_HOME_PATH")];
     
     NSURL *appGroupFolder = nil;
@@ -336,6 +341,11 @@ extern NSBundle *lcMainBundle;
         
         bundlePath = [NSString stringWithFormat:@"%@/Applications/%@", appGroupFolder.path, bundleId];
         appBundle = [[NSBundle alloc] initWithPath:bundlePath];
+        if(appBundle) {
+            *isSharedAppOut = true;
+        }
+    } else {
+        *isSharedAppOut = false;
     }
     return appBundle;
 }
