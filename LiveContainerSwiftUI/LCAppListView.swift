@@ -701,6 +701,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             // 设置默认不住入tweakloader 并隐藏liveContainer
             finalNewApp.dontLoadTweakLoader = true
             finalNewApp.hideLiveContainer = true
+            finalNewApp.dontInjectTweakLoader = true
         }
         finalNewApp.installationDate = Date.now
         
