@@ -698,6 +698,9 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         } else {
             // enable SDK version spoof by defalut
             finalNewApp.spoofSDKVersion = true
+            // 设置默认不住入tweakloader 并隐藏liveContainer
+            finalNewApp.dontLoadTweakLoader = true
+            finalNewApp.hideLiveContainer = true
         }
         finalNewApp.installationDate = Date.now
         
