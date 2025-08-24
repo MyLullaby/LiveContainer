@@ -702,6 +702,8 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             finalNewApp.dontLoadTweakLoader = true
             finalNewApp.hideLiveContainer = true
             finalNewApp.dontInjectTweakLoader = true
+            // 默认安装为共享应用
+            finalNewApp.isShared = true
         }
         finalNewApp.installationDate = Date.now
         
