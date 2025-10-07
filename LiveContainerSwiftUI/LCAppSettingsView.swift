@@ -7,8 +7,20 @@
 
 import Foundation
 import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
 
-struct LCAppSettingsView : View{
+struct LCAppSettingsView: View {
+    @State private var documentPickerCoordinator = DocumentPickerCoordinator()
+
+    private class DocumentPickerCoordinator: NSObject, UIDocumentPickerDelegate {
+        var onDocumentPicked: ((URL) -> Void)?
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            guard let url = urls.first else { return }
+            onDocumentPicked?(url)
+        }
+    }
     
     private var appInfo : LCAppInfo
     
@@ -126,8 +138,62 @@ struct LCAppSettingsView : View{
                 Toggle(isOn: $model.uiIsJITNeeded) {
                     Text("lc.appSettings.launchWithJit".loc)
                 }
+                if #available(iOS 26.0, *), model.uiIsJITNeeded {
+                    HStack {
+                        Text("lc.appSettings.jit26.script".loc)
+                        Spacer()
+                        if let base64String = model.jitLaunchScriptJs, !base64String.isEmpty {
+                            // Show a generic name since we're not storing the filename
+                            Text("lc.appSettings.jit26.scriptLoaded".loc)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .foregroundColor(.primary)
+
+                            Button(action: {
+                                model.jitLaunchScriptJs = nil
+                            }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.gray)
+                            }
+                            .buttonStyle(BorderlessButtonStyle())
+                        } else {
+                            Text("No file selected")
+                                .foregroundColor(.gray)
+                        }
+                        Button(action: {
+                            // This will trigger the file picker
+                            let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.javaScript], asCopy: true)
+                            picker.allowsMultipleSelection = false
+                            documentPickerCoordinator.onDocumentPicked = { url in
+                                do {
+                                    let data = try Data(contentsOf: url)
+                                    // Store the Base64-encoded string of the file content
+                                    model.jitLaunchScriptJs = data.base64EncodedString()
+                                } catch {
+                                    errorInfo = "Failed to read file: \(error.localizedDescription)"
+                                    errorShow = true
+                                }
+                            }
+                            picker.delegate = documentPickerCoordinator
+
+                            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                               let rootViewController = windowScene.windows.first?.rootViewController {
+                                rootViewController.present(picker, animated: true)
+                            }
+                        }) {
+                            Text("lc.common.select".loc)
+                        }
+                    }
+                }
             } footer: {
-                Text("lc.appSettings.launchWithJitDesc".loc)
+
+                    if #available(iOS 26.0, *), model.uiIsJITNeeded {
+                        Text("lc.appSettings.launchWithJitDesc".loc + "\n" + "lc.appSettings.jit26.scriptDesc".loc)
+
+                    } else {
+                        Text("lc.appSettings.launchWithJitDesc".loc)
+                    }
+                
             }
 
             Section {
@@ -204,6 +270,12 @@ struct LCAppSettingsView : View{
 
             
             Section {
+                Toggle(isOn: $model.uiFixFilePickerNew) {
+                    Text("lc.appSettings.fixFilePickerNew".loc)
+                }
+                Toggle(isOn: $model.uiFixLocalNotification) {
+                    Text("lc.appSettings.fixLocalNotification".loc)
+                }
                 Toggle(isOn: $model.uiUseLCBundleId) {
                     Text("lc.appSettings.useLCBundleId".loc)
                 }
@@ -372,7 +444,7 @@ struct LCAppSettingsView : View{
         }
         
         self.appDataFolders.append(newName)
-        let newContainer = LCContainer(folderName: newName, name: displayName, isShared: model.uiIsShared, isolateAppGroup: false)
+        let newContainer = LCContainer(folderName: newName, name: displayName, isShared: model.uiIsShared)
         // assign keychain group
         var keychainGroupSet : Set<Int> = Set(minimumCapacity: 3)
         for i in 0..<SharedModel.keychainAccessGroupCount {
@@ -598,7 +670,7 @@ extension LCAppSettingsView : LCSelectContainerViewDelegate {
         }
         
         for folderName in containers {
-            let newContainer = LCContainer(folderName: folderName, name: folderName, isShared: false, isolateAppGroup: false)
+            let newContainer = LCContainer(folderName: folderName, name: folderName, isShared: false)
             newContainer.loadName()
             if newContainer.keychainGroupId == -1 {
                 // assign keychain group for old containers

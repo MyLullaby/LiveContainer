@@ -24,7 +24,6 @@ struct LCSettingsView: View {
     
     @Binding var appDataFolderNames: [String]
 
-    @StateObject private var installLC2Alert = YesNoHelper()
     @State private var certificateDataFound = false
     
     @StateObject private var certificateImportAlert = YesNoHelper()
@@ -32,8 +31,6 @@ struct LCSettingsView: View {
     @StateObject private var certificateRemoveAlert = YesNoHelper()
     @StateObject private var certificateImportFileAlert = AlertHelper<URL>()
     @StateObject private var certificateImportPasswordAlert = InputHelper()
-    @State private var showShareSheet = false
-    @State private var shareURL : URL? = nil
     
     @AppStorage("LCFrameShortcutIcons") var frameShortIcon = false
     @AppStorage("LCSwitchAppWithoutAsking") var silentSwitchApp = false
@@ -48,6 +45,7 @@ struct LCSettingsView: View {
     
     @AppStorage("LCMultitaskMode", store: LCUtils.appGroupUserDefault) var multitaskMode: MultitaskMode = .virtualWindow
     @AppStorage("LCLaunchInMultitaskMode") var launchInMultitaskMode = false
+    @AppStorage("LCLaunchMultitaskMaximized") var launchMultitaskMaximized = false
     @AppStorage("LCMultitaskBottomWindowBar", store: LCUtils.appGroupUserDefault) var bottomWindowBar = false
     @AppStorage("LCAutoEndPiP", store: LCUtils.appGroupUserDefault) var autoEndPiP = false
     @AppStorage("LCDockWidth", store: LCUtils.appGroupUserDefault) var dockWidth: Double = 80
@@ -56,7 +54,9 @@ struct LCSettingsView: View {
     
     @AppStorage("LCLoadTweaksToSelf") var injectToLCItelf = false
     @AppStorage("LCIgnoreJITOnLaunch") var ignoreJITOnLaunch = false
+    #if is32BitSupported
     @AppStorage("selected32BitLayer") var liveExec32Path : String = ""
+    #endif
     @AppStorage("LCKeepSelectedWhenQuit") var keepSelectedWhenQuit = false
     @AppStorage("LCWaitForDebugger") var waitForDebugger = false
     
@@ -115,13 +115,11 @@ struct LCSettingsView: View {
                 }
                 if (store != .Unknown && store != .ADP) || LCUtils.isAppGroupAltStoreLike() {
                     Section{
-                        Button {
-                            Task { await installAnotherLC() }
+                        NavigationLink {
+                            LCMultiLCManagementView()
                         } label: {
                             if sharedModel.multiLCStatus == 0 {
                                 Text("lc.settings.multiLCInstall".loc)
-                            } else if sharedModel.multiLCStatus == 1 {
-                                Text("lc.settings.multiLCReinstall".loc)
                             } else if sharedModel.multiLCStatus == 2 {
                                 Text("lc.settings.multiLCIsSecond".loc)
                             }
@@ -220,7 +218,7 @@ struct LCSettingsView: View {
                     }
                 }
                 
-                if #available(iOS 16.1, *), sharedModel.multiLCStatus != 2 {
+                if #available(iOS 16.1, *) {
                     if(UIApplication.shared.supportsMultipleScenes) {
                         Picker(selection: $multitaskMode) {
                             Text("lc.settings.multitaskMode.virtualWindow".loc).tag(MultitaskMode.virtualWindow)
@@ -234,6 +232,9 @@ struct LCSettingsView: View {
                     }
                     
                     if multitaskMode == .virtualWindow {
+                        Toggle(isOn: $launchMultitaskMaximized) {
+                            Text("lc.settings.launchMultitaskMaximized".loc)
+                        }
                         Toggle(isOn: $autoEndPiP) {
                             Text("lc.settings.autoEndPiP".loc)
                         }
@@ -349,12 +350,14 @@ struct LCSettingsView: View {
                         } label: {
                             Text("Reset Symbol Offsets")
                         }
+                        #if is32BitSupported
                         HStack {
                             Text("LiveExec32 .app path")
                             Spacer()
                             TextField("", text: $liveExec32Path)
                                 .multilineTextAlignment(.trailing)
                         }
+                        #endif
                     } header: {
                         Text("Developer Settings")
                     } footer: {
@@ -363,12 +366,6 @@ struct LCSettingsView: View {
                 }
             }
             .navigationBarTitle("lc.tabView.settings".loc)
-            .onAppear {
-                sharedModel.updateMultiLCStatus()
-            }
-            .onForeground {
-                sharedModel.updateMultiLCStatus()
-            }
             .alert("lc.common.error".loc, isPresented: $errorShow){
             } message: {
                 Text(errorInfo)
@@ -376,19 +373,6 @@ struct LCSettingsView: View {
             .alert("lc.common.success".loc, isPresented: $successShow){
             } message: {
                 Text(successInfo)
-            }
-            .alert("lc.settings.multiLCInstall".loc, isPresented: $installLC2Alert.show) {
-                Button {
-                    installLC2Alert.close(result: true)
-                } label: {
-                    Text("lc.common.continue".loc)
-                }
-
-                Button("lc.common.cancel".loc, role: .cancel) {
-                    installLC2Alert.close(result: false)
-                }
-            } message: {
-                Text("lc.settings.multiLCInstallAlertDesc %@".localizeWithFormat(storeName))
             }
             .alert("lc.settings.importCertificate".loc, isPresented: $certificateImportAlert.show) {
                 Button {
@@ -413,6 +397,8 @@ struct LCSettingsView: View {
                 Button("lc.common.cancel".loc, role: .cancel) {
                     certificateRemoveAlert.close(result: false)
                 }
+            } message: {
+                Text("lc.settings.removeCertificateDesc".loc)
             }
             .alert("lc.settings.importCertFromBuiltinSideStore".loc, isPresented: $certificateImportFromBuiltInSideStoreAlert.show) {
                 Button {
@@ -445,37 +431,9 @@ struct LCSettingsView: View {
                 }
             )
         }
-        .sheet(isPresented: $showShareSheet) {
-            if let shareURL = shareURL {
-                ActivityViewController(activityItems: [shareURL])
-            }
-        }
         .navigationViewStyle(StackNavigationViewStyle())
         .onOpenURL { url in
             handleURL(url: url)
-        }
-    }
-    
-    func installAnotherLC() async {
-        if !LCUtils.isAppGroupAltStoreLike() {
-            errorInfo = "lc.settings.unsupportedInstallMethod".loc
-            errorShow = true
-            return;
-        }
-        
-        guard let result = await installLC2Alert.open(), result else {
-            return
-        }
-        
-        do {
-            let packedIpaUrl = try LCUtils.archiveIPA(withBundleName: "LiveContainer2")
-            
-            shareURL = packedIpaUrl
-            showShareSheet = true
-            
-        } catch {
-            errorInfo = error.localizedDescription
-            errorShow = true
         }
     }
     

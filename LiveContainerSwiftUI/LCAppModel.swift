@@ -4,6 +4,9 @@ protocol LCAppModelDelegate {
     func closeNavigationView()
     func changeAppVisibility(app : LCAppModel)
     func jitLaunch() async
+    func jitLaunch(withScript script: String) async
+    func jitLaunch(withPID pid: Int) async
+    func jitLaunch(withPID pid: Int, withScript script: String) async
     func showRunWhenMultitaskAlert() async -> Bool?
 }
 
@@ -27,9 +30,9 @@ class LCAppModel: ObservableObject, Hashable {
     @Published var uiDefaultDataFolder : String?
     @Published var uiContainers : [LCContainer]
     @Published var uiSelectedContainer : LCContainer?
-    
+#if is32BitSupported
     @Published var uiIs32bit : Bool
-    
+#endif
     @Published var uiTweakFolder : String? {
         didSet {
             appInfo.tweakFolder = uiTweakFolder
@@ -43,6 +46,17 @@ class LCAppModel: ObservableObject, Hashable {
     @Published var uiUseLCBundleId : Bool {
         didSet {
             appInfo.doUseLCBundleId = uiUseLCBundleId
+        }
+    }
+    
+    @Published var uiFixFilePickerNew : Bool {
+        didSet {
+            appInfo.fixFilePickerNew = uiFixFilePickerNew
+        }
+    }
+    @Published var uiFixLocalNotification : Bool {
+        didSet {
+            appInfo.fixLocalNotification = uiFixLocalNotification
         }
     }
     
@@ -79,6 +93,12 @@ class LCAppModel: ObservableObject, Hashable {
         }
     }
     
+    @Published var jitLaunchScriptJs: String? {
+        didSet {
+            appInfo.jitLaunchScriptJs = jitLaunchScriptJs
+        }
+    }
+
     @Published var uiSpoofSDKVersion : Bool {
         didSet {
             appInfo.spoofSDKVersion = uiSpoofSDKVersion
@@ -108,15 +128,18 @@ class LCAppModel: ObservableObject, Hashable {
         self.uiDoSymlinkInbox = appInfo.doSymlinkInbox
         self.uiOrientationLock = appInfo.orientationLock
         self.uiUseLCBundleId = appInfo.doUseLCBundleId
+        self.uiFixFilePickerNew = appInfo.fixFilePickerNew
+        self.uiFixLocalNotification = appInfo.fixLocalNotification
         self.uiHideLiveContainer = appInfo.hideLiveContainer
         self.uiDontInjectTweakLoader = appInfo.dontInjectTweakLoader
         self.uiTweakLoaderInjectFailed = appInfo.info()["LCTweakLoaderCantInject"] as? Bool ?? false
         self.uiDontLoadTweakLoader = appInfo.dontLoadTweakLoader
         self.uiDontSign = appInfo.dontSign
+        self.jitLaunchScriptJs = appInfo.jitLaunchScriptJs
         self.uiSpoofSDKVersion = appInfo.spoofSDKVersion
-        
+#if is32BitSupported
         self.uiIs32bit = appInfo.is32bit
-        
+#endif
         for container in uiContainers {
             if container.folderName == uiDefaultDataFolder {
                 self.uiSelectedContainer = container;
@@ -139,24 +162,14 @@ class LCAppModel: ObservableObject, Hashable {
         }
         
         var multitask = multitask
-        if(appInfo.isJITNeeded && multitask) {
-            multitask = false
-        }
         
         if multitask && !uiIsShared {
             throw "It's not possible to multitask with private apps."
         }
         
-        // ask user if they want to terminate all multitasking apps
-        if MultitaskManager.isMultitasking() && !multitask {
-            guard let ans = await delegate?.showRunWhenMultitaskAlert(), ans else {
-                return
-            }
-        }
-        
         if uiContainers.isEmpty {
             let newName = NSUUID().uuidString
-            let newContainer = LCContainer(folderName: newName, name: newName, isShared: uiIsShared, isolateAppGroup: false)
+            let newContainer = LCContainer(folderName: newName, name: newName, isShared: uiIsShared)
             uiContainers.append(newContainer)
             if uiSelectedContainer == nil {
                 uiSelectedContainer = newContainer;
@@ -175,26 +188,46 @@ class LCAppModel: ObservableObject, Hashable {
             }
         }
         
-        if(multitask && MultitaskManager.isUsing(container: uiSelectedContainer!.folderName)) {
-            throw "lc.container.inUse".loc + "\n MultiTask"
-        }
+        // this is rerouted to bringing app to front, so not needed here?
+//        if(MultitaskManager.isUsing(container: uiSelectedContainer!.folderName)) {
+//            throw "lc.container.inUse".loc + "\n MultiTask"
+//        }
         
+        // if the selected container is in use (either other lc or multitask), open the host lc associated with it
         if
             let fn = uiSelectedContainer?.folderName,
-            var runningLC = LCUtils.getContainerUsingLCScheme(withFolderName: fn),
-            !(runningLC == "liveprocess" && DataManager.shared.model.multiLCStatus != 2)
+            var runningLC = LCUtils.getContainerUsingLCScheme(withFolderName: fn)
         {
-            if(!multitask && runningLC == "liveprocess" && DataManager.shared.model.multiLCStatus == 2) {
-                // we can't control the extension from lc2, so we launch lc1
-                runningLC = "livecontainer"
-            }
-
-            let openURL = URL(string: "\(runningLC)://livecontainer-launch?bundle-name=\(self.appInfo.relativeBundlePath!)&container-folder-name=\(fn)")!
+            runningLC = (runningLC as NSString).deletingPathExtension
+            
+            let openURL = URL(string: "\(runningLC)://")!
             if await UIApplication.shared.canOpenURL(openURL) {
                 await UIApplication.shared.open(openURL)
                 return
             }
         }
+        
+        // ask user if they want to terminate all multitasking apps
+        if MultitaskManager.isMultitasking() && !multitask {
+            if #available(iOS 16.0, *), let currentDataFolder = containerFolderName != nil ? containerFolderName : uiSelectedContainer?.folderName,
+               MultitaskManager.isUsing(container: currentDataFolder) {
+                var found = false
+                if #available(iOS 16.1, *) {
+                    found = MultitaskWindowManager.openExistingAppWindow(dataUUID: currentDataFolder)
+                }
+                if !found {
+                    found = MultitaskDockManager.shared.bringMultitaskViewToFront(uuid: currentDataFolder)
+                }
+                if found {
+                    return
+                }
+            }
+            
+            guard let ans = await delegate?.showRunWhenMultitaskAlert(), ans else {
+                return
+            }
+        }
+        
         await MainActor.run {
             isAppRunning = true
         }
@@ -213,9 +246,41 @@ class LCAppModel: ObservableObject, Hashable {
         
 
         UserDefaults.standard.set(uiSelectedContainer?.folderName, forKey: "selectedContainer")
-
-        if appInfo.isJITNeeded || appInfo.is32bit {
-            await delegate?.jitLaunch()
+        var is32bit = false
+        
+        #if is32BitSupported
+        is32bit = appInfo.is32bit
+        #endif
+        if appInfo.isJITNeeded || is32bit {
+            if multitask, #available(iOS 17.4, *) {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    LCUtils.launchMultitaskGuestApp(withPIDCallback: appInfo.displayName(), pidCompletionHandler: { pidNumber, error in
+                        if let error {
+                            continuation.resume(throwing: error)
+                            return
+                        }
+                        guard let pidNumber = pidNumber else {
+                            continuation.resume(throwing: "Failed to obtain PID from LiveProcess")
+                            return
+                        }
+                        Task {
+                            if let scriptData = self.jitLaunchScriptJs, !scriptData.isEmpty {
+                                await self.delegate?.jitLaunch(withPID: pidNumber.intValue, withScript: scriptData)
+                            } else {
+                                await self.delegate?.jitLaunch(withPID: pidNumber.intValue)
+                            }
+                            continuation.resume()
+                        }
+                    })
+                }
+            } else {
+                // Non-multitask JIT flow remains unchanged
+                if let scriptData = jitLaunchScriptJs, !scriptData.isEmpty {
+                    await delegate?.jitLaunch(withScript: scriptData)
+                } else {
+                    await delegate?.jitLaunch()
+                }
+            }
         } else if multitask, #available(iOS 16.0, *) {
             try await LCUtils.launchMultitaskGuestApp(appInfo.displayName())
         } else {

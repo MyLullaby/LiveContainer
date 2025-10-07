@@ -61,7 +61,7 @@ struct LCPath {
 class SharedModel: ObservableObject {
     @Published var isHiddenAppUnlocked = false
     @Published var developerMode = false
-    // 0= not installed, 1= is installed, 2=current liveContainer is the second one
+    // 0= not installed, 2=current liveContainer is not the primary one
     @Published var multiLCStatus = 0
     @Published var isJITModalOpen = false
     
@@ -96,8 +96,6 @@ class SharedModel: ObservableObject {
     func updateMultiLCStatus() {
         if LCUtils.appUrlScheme()?.lowercased() != "livecontainer" {
             multiLCStatus = 2
-        } else if UIApplication.shared.canOpenURL(URL(string: "livecontainer2://")!) {
-            multiLCStatus = 1
         } else {
             multiLCStatus = 0
         }
@@ -812,7 +810,7 @@ extension LCUtils {
         }
     }
     
-    public static func askForJIT(onServerMessage : ((String) -> Void)? ) async -> Bool {
+    public static func askForJIT(withScript script: String? = nil, onServerMessage: ((String) -> Void)? = nil) async -> Bool {
         // if LiveContainer is installed by TrollStore
         let tsPath = "\(Bundle.main.bundlePath)/../_TrollStore"
         if (access((tsPath as NSString).utf8String, 0) == 0) {
@@ -900,7 +898,11 @@ extension LCUtils {
             }
             
         } else if jitEnabler == .StkiJIT || jitEnabler == .StikJITLC {
-            let launchURLStr = "stikjit://enable-jit?bundle-id=\(Bundle.main.bundleIdentifier!)"
+            var launchURLStr = "stikjit://enable-jit?bundle-id=\(Bundle.main.bundleIdentifier!)"
+
+            if let script = script, !script.isEmpty {
+                launchURLStr += "&script-data=\(script)"
+            }
             let launchURL : URL
             if jitEnabler == .StikJITLC {
                 let encodedStr = Data(launchURLStr.utf8).base64EncodedString()
@@ -933,6 +935,14 @@ extension LCUtils {
         return false
     }
 
+    
+    static func openSideStore(delegate: LCAppModelDelegate? = nil) {
+        let sideStoreApp = LCAppModel(appInfo: LCAppInfo(bundlePath: Bundle.main.bundleURL.appendingPathComponent("Frameworks/SideStoreApp.framework").path), delegate: delegate)
+        
+        Task {
+            try await sideStoreApp.runApp(bundleIdOverride: "builtinSideStore")
+        }
+    }
 }
 
 struct JITStreamerEBLaunchAppResponse : Codable {

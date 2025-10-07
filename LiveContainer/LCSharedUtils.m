@@ -116,11 +116,7 @@ extern NSBundle *lcMainBundle;
 }
 
 + (NSString *)certificatePassword {
-    NSUserDefaults* nud = [[NSUserDefaults alloc] initWithSuiteName:[self appGroupID]];
-    if(!nud) {
-        nud = NSUserDefaults.standardUserDefaults;
-    }
-    
+    NSUserDefaults* nud = NSUserDefaults.lcSharedDefaults ?: NSUserDefaults.standardUserDefaults;
     return [nud objectForKey:@"LCCertificatePassword"];
 }
 
@@ -218,7 +214,12 @@ extern NSBundle *lcMainBundle;
         return NO;
     }
     
-    uint64_t val57 = [info[lc] longLongValue];
+    NSNumber* num57 = info[lc];
+    if(![num57 isKindOfClass:NSNumber.class]) {
+        return NO;
+    }
+    
+    uint64_t val57 = [num57 longLongValue];
     audit_token_t token;
     token.val[5] = val57 >> 32;
     token.val[7] = val57 & 0xffffffff;
@@ -249,7 +250,8 @@ extern NSBundle *lcMainBundle;
     return errno==ESRCH ? nil : appUsageInfo[@"runningLC"];
 }
 
-+ (void)setContainerUsingByLC:(NSString*)lc folderName:(NSString*)folderName {
+// lc can be something like livecontainer or livecontainer2.liveprocess, such that one LC can jump to another LC hosting the multitask app when user presses run while it's running
++ (void)setContainerUsingByLC:(NSString*)lc folderName:(NSString*)folderName auditToken:(uint64_t)val57 {
     NSURL* infoPath = [self containerLockPath];
     
     NSMutableDictionary *info = [NSMutableDictionary dictionaryWithContentsOfFile:infoPath.path];
@@ -257,15 +259,16 @@ extern NSBundle *lcMainBundle;
         info = [NSMutableDictionary new];
     }
     
-    audit_token_t token;
-    mach_msg_type_number_t size = TASK_AUDIT_TOKEN_COUNT;
-
-    kern_return_t kr = task_info(mach_task_self(), TASK_AUDIT_TOKEN, (task_info_t)&token, &size);
-    if (kr != KERN_SUCCESS) {
-        NSLog(@"Error getting task audit_token");
+    if(val57 == 0) {
+        audit_token_t token;
+        mach_msg_type_number_t size = TASK_AUDIT_TOKEN_COUNT;
+        
+        kern_return_t kr = task_info(mach_task_self(), TASK_AUDIT_TOKEN, (task_info_t)&token, &size);
+        if (kr != KERN_SUCCESS) {
+            NSLog(@"Error getting task audit_token");
+        }
+        val57 = token.val[7] | ((uint64_t)token.val[5] << 32);
     }
-    uint64_t val57 = token.val[7];
-    val57 |= ((uint64_t)token.val[5]) << 32;
     info[folderName] = @{
         @"runningLC": lc,
         @"auditToken57": @(val57)
@@ -275,7 +278,7 @@ extern NSBundle *lcMainBundle;
         info[lc] = @(val57);
     }
 
-    [info writeToFile:infoPath.path atomically:YES];
+    [info writeBinToFile:infoPath.path atomically:YES];
 }
 
 // move app data to private folder to prevent 0xdead10cc https://forums.developer.apple.com/forums/thread/126438
@@ -322,7 +325,7 @@ extern NSBundle *lcMainBundle;
     
 }
 
-+ (NSBundle*)findBundleWithBundleId:(NSString*)bundleId {
++ (NSBundle*)findBundleWithBundleId:(NSString*)bundleId isSharedAppOut:(bool*)isSharedAppOut {
     NSString *docPath = [NSString stringWithFormat:@"%s/Documents", getenv("LC_HOME_PATH")];
     
     NSURL *appGroupFolder = nil;
@@ -335,6 +338,11 @@ extern NSBundle *lcMainBundle;
         
         bundlePath = [NSString stringWithFormat:@"%@/Applications/%@", appGroupFolder.path, bundleId];
         appBundle = [[NSBundle alloc] initWithPath:bundlePath];
+        if(appBundle) {
+            *isSharedAppOut = true;
+        }
+    } else {
+        *isSharedAppOut = false;
     }
     return appBundle;
 }

@@ -1,5 +1,7 @@
 #import <Foundation/Foundation.h>
 #import "LCMachOUtils.h"
+#import "utils.h"
+@import UIKit;
 
 typedef NS_ENUM(NSInteger, Store){
     SideStore = 0,
@@ -17,6 +19,10 @@ int dyld_get_program_sdk_version(void);
 
 @end
 
+@interface UIDevice(private)
+@property(readonly) NSString* buildVersion;
+@end
+
 @interface LCUtils : NSObject
 
 + (void)validateJITLessSetupWithCompletionHandler:(void (^)(BOOL success, NSError *error))completionHandler;
@@ -27,6 +33,7 @@ int dyld_get_program_sdk_version(void);
 + (BOOL)launchToGuestApp;
 + (BOOL)launchToGuestAppWithURL:(NSURL *)url;
 + (void)launchMultitaskGuestApp:(NSString *)displayName completionHandler:(void (^)(NSError *error))completionHandler API_AVAILABLE(ios(16.0));
++ (void)launchMultitaskGuestAppWithPIDCallback:(NSString *)displayName pidCompletionHandler:(void (^)(NSNumber *pid, NSError *error))completionHandler API_AVAILABLE(ios(16.0));
 + (NSString*)getContainerUsingLCSchemeWithFolderName:(NSString*)folderName;
 
 + (NSProgress *)signAppBundleWithZSign:(NSURL *)path completionHandler:(void (^)(BOOL success, NSError *error))completionHandler;
@@ -41,6 +48,7 @@ int dyld_get_program_sdk_version(void);
 + (NSURL *)appGroupPath;
 + (NSString *)storeInstallURLScheme;
 + (NSString *)getVersionInfo;
++ (NSString *)liveProcessBundleIdentifier;
 @end
 
 @interface NSUserDefaults(LiveContainer)

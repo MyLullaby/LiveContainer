@@ -237,7 +237,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                 ToolbarItem(placement: .topBarLeading) {
                     if(UserDefaults.sideStoreExist()) {
                         Button {
-                            openSideStore()
+                            LCUtils.openSideStore(delegate: self)
                         } label: {
                             Image("SideStoreBadge")
                                 .resizable()
@@ -246,7 +246,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                                     if SharedModel.isLiquidGlassEnabled {
                                         return Color.primary
                                     } else {
-                                        return Color.blue
+                                        return Color.accentColor
                                     }
                                 }())
                                 .frame(width: UIFont.preferredFont(forTextStyle: .body).lineHeight, height: UIFont.preferredFont(forTextStyle: .body).lineHeight)
@@ -689,6 +689,8 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             finalNewApp.hideLiveContainer = appToReplace.appInfo.hideLiveContainer
             finalNewApp.dontLoadTweakLoader = appToReplace.appInfo.dontLoadTweakLoader
             finalNewApp.doUseLCBundleId = appToReplace.appInfo.doUseLCBundleId
+            finalNewApp.fixFilePickerNew = appToReplace.appInfo.fixFilePickerNew
+            finalNewApp.fixLocalNotification = appToReplace.appInfo.fixLocalNotification
             finalNewApp.lastLaunched = appToReplace.appInfo.lastLaunched
             finalNewApp.autoSaveDisabled = false
             finalNewApp.save()
@@ -890,22 +892,8 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             return
         }
 
-        do {
+        do {            
             if #available(iOS 16.0, *), launchInMultitaskMode && appFound.uiIsShared {
-                if let currentDataFolder = container != nil ? container : appFound.uiSelectedContainer?.folderName,
-                   MultitaskManager.isUsing(container: currentDataFolder) {
-                    var found = false
-                    if #available(iOS 16.1, *) {
-                        found = MultitaskWindowManager.openExistingAppWindow(dataUUID: currentDataFolder)
-                    }
-                    if !found {
-                        found = MultitaskDockManager.shared.bringMultitaskViewToFront(uuid: currentDataFolder)
-                    }
-                    if found {
-                        return
-                    }
-                }
-
                 try await appFound.runApp(multitask: true, containerFolderName: container)
             } else {
                 try await appFound.runApp(multitask: false, containerFolderName: container)
@@ -930,17 +918,20 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     }
     
     func jitLaunch() async {
+        await jitLaunch(withScript: "")
+    }
+
+    func jitLaunch(withScript script: String) async {
         await MainActor.run {
             jitLog = ""
         }
         let enableJITTask = Task {
-            let _ = await LCUtils.askForJIT { newMsg in
+            let _ = await LCUtils.askForJIT(withScript: script) { newMsg in
                 Task { await MainActor.run {
                     self.jitLog += "\(newMsg)\n"
                 }}
             }
-            guard
-                  let _ = JITEnablerType(rawValue: LCUtils.appGroupUserDefault.integer(forKey: "LCJITEnablerType")) else {
+            guard let _ = JITEnablerType(rawValue: LCUtils.appGroupUserDefault.integer(forKey: "LCJITEnablerType")) else {
                 return
             }
         }
@@ -953,6 +944,23 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
 
     }
     
+    func jitLaunch(withPID pid: Int) async {
+        await MainActor.run {
+            if let url = URL(string: "stikjit://enable-jit?bundle-id=\(Bundle.main.bundleIdentifier!)pid=\(pid)") {
+                UIApplication.shared.open(url)
+            }
+        }
+    }
+
+    func jitLaunch(withPID pid: Int, withScript script: String) async {
+        await MainActor.run {
+            let encoded = script.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+            if let url = URL(string: "stikjit://enable-jit?bundle-id=\(Bundle.main.bundleIdentifier!)&pid=\(pid)&script-data=\(encoded)") {
+                UIApplication.shared.open(url)
+            }
+        }
+    }
+
     func showRunWhenMultitaskAlert() async -> Bool? {
         return await runWhenMultitaskAlert.open()
     }
@@ -979,6 +987,12 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     func handleURL(url : URL) {
         if url.isFileURL {
             Task { await installFromUrl(urlStr: url.absoluteString) }
+            return
+        }
+        
+        if url.scheme == "sidestore" && UserDefaults.sideStoreExist() {
+            UserDefaults.standard.setValue(url.absoluteString, forKey: "launchAppUrlScheme")
+            LCUtils.openSideStore(delegate: self)
             return
         }
         
@@ -1023,12 +1037,6 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         }
     }
     
-    func openSideStore() {
-        let sideStoreApp = LCAppModel(appInfo: LCAppInfo(bundlePath: Bundle.main.bundleURL.appendingPathComponent("Frameworks/SideStoreApp.framework").path))
-        Task {
-            try await sideStoreApp.runApp(bundleIdOverride: "builtinSideStore")
-        }
-    }
 }
 
 extension View {

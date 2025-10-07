@@ -26,14 +26,17 @@ It’s recommended to follow the following steps to set up JIT-Less mode for usi
 ## Requirements
 
 - iOS/iPadOS 15+
+   + Multitasking requires iOS/iPadOS 16.0+
 - AltStore 2.0+ / SideStore 0.6.0+
 
 ## Downloads
 ### Stable:
-  [AltSource (raw)](https://raw.githubusercontent.com/LiveContainer/LiveContainer/refs/heads/main/apps.json) ([Add to AltStore](https://tinyurl.com/LCAltStoreClassic), [Add to SideStore](https://tinyurl.com/LCSideStore)), [IPA download](https://github.com/LiveContainer/LiveContainer/releases/latest/download/LiveContainer.ipa)
+  [AltSource (raw)](https://raw.githubusercontent.com/LiveContainer/LiveContainer/refs/heads/main/apps.json) 
+  ([Add to AltStore](https://intradeus.github.io/http-protocol-redirector?r=altstore://source?url=https://raw.githubusercontent.com/LiveContainer/LiveContainer/refs/heads/main/apps.json), 
+  [Add to SideStore](https://intradeus.github.io/http-protocol-redirector?r=sidestore://source?url=https://raw.githubusercontent.com/LiveContainer/LiveContainer/refs/heads/main/apps.json)), [IPA download](https://github.com/LiveContainer/LiveContainer/releases/latest/download/LiveContainer.ipa)
 
 ### Nightly:
-  [AltSource (raw)](https://github.com/LiveContainer/LiveContainer/releases/download/nightly/apps_nightly.json) ([Add to AltStore](https://tinyurl.com/LC-NAltStoreClassic), [Add to SideStore](https://tinyurl.com/LC-NSideStore)), [IPA download](https://github.com/LiveContainer/LiveContainer/releases/download/nightly/LiveContainer.ipa)
+  [AltSource (raw)](https://github.com/LiveContainer/LiveContainer/releases/download/nightly/apps_nightly.json) ([Add to AltStore](https://intradeus.github.io/http-protocol-redirector?r=altstore://source?url=https://github.com/LiveContainer/LiveContainer/releases/download/nightly/apps_nightly.json), [Add to SideStore](https://intradeus.github.io/http-protocol-redirector?r=sidestore://source?url=https://github.com/LiveContainer/LiveContainer/releases/download/nightly/apps_nightly.json)), [IPA download](https://github.com/LiveContainer/LiveContainer/releases/download/nightly/LiveContainer.ipa)
 
 - It is recommended to setup JIT-Less mode, in which LiveContainer signs your apps with your certificate from AltStore/SideStore (see the instructions below).
 
@@ -125,6 +128,13 @@ Open Xcode, edit `DEVELOPMENT_TEAM[config=Debug]` in `xcconfigs/Global.xcconfig`
 - SwiftUI rewrite of LiveContainerUI (by @hugeBlack)
 - Language file `Localizable.xcstrings` is in here for multilingual support. To help us translate LiveContainer, please visit [our crowdin project](https://crowdin.com/project/livecontainer)
 
+### MultitaskSupport
+- Contains the implementation of multitasking feature.
+- Based on [FrontBoardAppLauncher](https://github.com/khanhduytran0/FrontBoardAppLauncher)
+
+### SideStore
+- Supporting code for SideStore's app refreshing integration
+
 ### TweakLoader
 - A simple tweak injector, which loads CydiaSubstrate and loads tweaks.
 - Injected to every app you install in LiveContainer.
@@ -133,7 +143,7 @@ Open Xcode, edit `DEVELOPMENT_TEAM[config=Debug]` in `xcconfigs/Global.xcconfig`
 - The app signer shipped with LiveContainer.
 - Originally made by [zhlynn](https://github.com/zhlynn/zsign).
 - LiveContainer uses [Feather's](https://github.com/khcrysalis/Feather) version of ZSign modified by khcrysalis.
-- Changes are made to meet LiveContainer's need.
+- Changes are made to meet LiveContainer's needs.
 
 ## How does it work?
 
@@ -179,7 +189,8 @@ Open Xcode, edit `DEVELOPMENT_TEAM[config=Debug]` in `xcconfigs/Global.xcconfig`
 - App Permissions are globally applied.
 - Guest app containers are not sandboxed. This means one guest app can access other guest apps' data.
 - App extensions aren't supported. they cannot be registered because: LiveContainer is sandboxed, SpringBoard doesn't know what apps are installed in LiveContainer, and they take up App ID.
-- Remote push notification might not work. ~~If you have a paid developer account then you don't even have to use LiveContainer~~
+- Multitasking can be achieved by using multiple LiveContainer and the multitasking feature. However, while we were able to fix physical keyboard input issue on iPadOS (https://github.com/LiveContainer/LiveContainer/issues/524), iPhone Mirroring uses different checks which still broke it (https://github.com/LiveContainer/LiveContainer/issues/793).
+- Remote push notification will not work
 - Querying custom URL schemes might not work(?)
 
 ## TODO

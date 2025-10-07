@@ -9,7 +9,7 @@
 #import "LCMachOUtils.h"
 #import "LCSharedUtils.h"
 #import "utils.h"
-#import "litehook_internal.h"
+#import "../../litehook/src/litehook.h"
 #include "Tweaks.h"
 @import ObjectiveC;
 @import MachO;
@@ -124,6 +124,9 @@ bool isAppleIdentifier(NSString* identifier) {
 -(id)hook_initWithDomain:(CFStringRef)domain user:(CFStringRef)user byHost:(bool)host containerPath:(CFStringRef)containerPath containingPreferences:(id)arg5 {
     if(isAppleIdentifier((__bridge NSString*)domain)) {
         return [self hook_initWithDomain:domain user:user byHost:host containerPath:containerPath containingPreferences:arg5];
+    }
+    if(user == kCFPreferencesAnyUser) {
+        user = kCFPreferencesCurrentUser;
     }
     return [self hook_initWithDomain:domain user:user byHost:host containerPath:(__bridge CFStringRef)appContainerPath containingPreferences:arg5];
 }

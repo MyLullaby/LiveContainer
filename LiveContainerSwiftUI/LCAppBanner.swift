@@ -58,7 +58,6 @@ struct LCAppBanner : View {
                 Image(uiImage: appInfo.icon())
                     .resizable().resizable().frame(width: 60, height: 60)
                     .clipShape(RoundedRectangle(cornerSize: CGSize(width:12, height: 12)))
-                    
 
                 VStack (alignment: .leading, content: {
                     HStack {
@@ -81,6 +80,7 @@ struct LCAppBanner : View {
                                     Capsule().fill(Color("JITBadgeColor"))
                                 )
                         }
+#if is32BitSupported
                         if model.uiIs32bit {
                             Text("32")
                                 .font(.system(size: 8))
@@ -90,6 +90,7 @@ struct LCAppBanner : View {
                                     Capsule().fill(Color("32BitBadgeColor"))
                                 )
                         }
+#endif
                         if model.uiIsLocked && !model.uiIsHidden {
                             Image(systemName: "lock.fill")
                                 .font(.system(size: 8))
@@ -105,6 +106,7 @@ struct LCAppBanner : View {
                     Text(model.uiSelectedContainer?.name ?? "lc.appBanner.noDataFolder".loc).font(.system(size: 8)).foregroundColor(dynamicColors ? mainColor : Color("FontColor"))
                 })
             }
+            .allowsHitTesting(false)
             Spacer()
             Button {
                 if #available(iOS 16.0, *), sharedModel.multiLCStatus != 2 && launchInMultitaskMode && model.uiIsShared {
@@ -162,11 +164,12 @@ struct LCAppBanner : View {
         }
         .padding()
         .frame(height: 88)
-        .background(RoundedRectangle(cornerSize: CGSize(width:22, height: 22)).fill(dynamicColors ? mainColor.opacity(0.5) : Color("AppBannerBG")))
-        .onTapGesture(count: 2) {
-            openSettings()
+        .background {
+            RoundedRectangle(cornerSize: CGSize(width:22, height: 22)).fill(dynamicColors ? mainColor.opacity(0.5) : Color("AppBannerBG"))
+                .onTapGesture(count: 2) {
+                    openSettings()
+                }
         }
-        
         .fileExporter(
             isPresented: $saveIconExporterShow,
             document: saveIconFile,
@@ -200,7 +203,7 @@ struct LCAppBanner : View {
                         }
                     }
                 }
-                if(sharedModel.multiLCStatus != 2 && model.uiIsShared) {
+                if(model.uiIsShared) {
                     if #available(iOS 16.0, *) {
                         Button {
                             if launchInMultitaskMode {
@@ -280,7 +283,7 @@ struct LCAppBanner : View {
                 appFolderRemovalAlert.close(result: false)
             }
         } message: {
-            Text("lc.appBanner.deleteDataMsg \(appInfo.displayName()!)")
+            Text("lc.appBanner.deleteDataMsg %@".localizeWithFormat(appInfo.displayName()!))
         }
         
         .alert("lc.common.error".loc, isPresented: $errorShow){
