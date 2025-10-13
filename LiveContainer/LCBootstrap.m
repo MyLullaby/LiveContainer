@@ -25,6 +25,7 @@ NSString *lcAppGroupPath;
 NSString* lcAppUrlScheme;
 NSBundle* lcMainBundle;
 NSDictionary* guestAppInfo;
+NSDictionary* guestContainerInfo;
 NSString* lcGuestAppId;
 bool isLiveProcess = false;
 bool isSharedBundle = false;
@@ -49,6 +50,10 @@ bool sideStoreExist = false;
 }
 + (NSDictionary *)guestAppInfo {
     return guestAppInfo;
+}
+
++ (NSDictionary *)guestContainerInfo {
+    return guestContainerInfo;
 }
 
 + (bool)isLiveProcess {
@@ -262,7 +267,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
                 NSString *expectedBundleId = [entStr substringFromIndex:dotRange.location + 1];
                 if(![infoPlist[@"CFBundleIdentifier"] isEqualToString:expectedBundleId]) {
                     infoPlist[@"CFBundleIdentifier"] = expectedBundleId;
-                    [infoPlist writeToFile:[NSString stringWithFormat:@"%@/Info.plist", bundlePath] atomically:YES];
+                    [infoPlist writeBinToFile:[NSString stringWithFormat:@"%@/Info.plist", bundlePath] atomically:YES];
                 }
             }
         }
@@ -285,7 +290,13 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     }
     
     if(isSharedBundle) {
-        [LCSharedUtils setContainerUsingByLC:lcAppUrlScheme folderName:dataUUID];
+        NSString *urlScheme = lcAppUrlScheme;
+        if(isLiveProcess) {
+            NSString *hostScheme = [lcUserDefaults stringForKey:@"hostUrlScheme"];
+            [lcUserDefaults removeObjectForKey:@"hostUrlScheme"];
+            urlScheme = [hostScheme stringByAppendingPathExtension:urlScheme];
+        }
+        [LCSharedUtils setContainerUsingByLC:urlScheme folderName:dataUUID auditToken:0];
     }
     
     NSError *error;
@@ -399,6 +410,9 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
         [fm createDirectoryAtPath:dirPath withIntermediateDirectories:YES attributes:nil error:nil];
     }
     
+    NSString* containerInfoPath = [newHomePath stringByAppendingPathComponent:@"LCContainerInfo.plist"];
+    guestContainerInfo = [NSDictionary dictionaryWithContentsOfFile:containerInfoPath];
+    
     // Overwrite NSBundle
     overwriteMainNSBundle(appBundle);
 
@@ -433,7 +447,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, NSSetUncaughtExceptionHandler, hook_do_nothing, nil);
     
     DyldHooksInit([guestAppInfo[@"hideLiveContainer"] boolValue], [guestAppInfo[@"spoofSDKVersion"] unsignedIntValue]);
-    
+#if is32BitSupported
     bool is32bit = [guestAppInfo[@"is32bit"] boolValue];
     if(is32bit) {
         if (!isJitEnabled) {
@@ -457,7 +471,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
         // maybe need to save selected32bitLayerBundle to static variable?
         appExecPath = strdup(selected32bitLayerBundle.executablePath.UTF8String);
     }
-    
+#endif
     if(![guestAppInfo[@"dontInjectTweakLoader"] boolValue]) {
         tweakLoaderLoaded = true;
     }
@@ -497,7 +511,12 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     [NSUserDefaults performSelector:@selector(initialize)];
 
     // Attempt to load the bundle. 32-bit bundle will always fail because of 32-bit main executable, so ignore it
-    if (!is32bit && ![appBundle loadAndReturnError:&error]) {
+    if (
+#if is32BitSupported
+        !is32bit &&
+#endif
+        ![appBundle loadAndReturnError:&error]
+        ) {
         appError = error.localizedDescription;
         NSLog(@"[LCBootstrap] loading bundle failed: %@", error);
         *path = oldPath;
@@ -517,14 +536,17 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     // Go!
     NSLog(@"[LCBootstrap] jumping to main %p", appMain);
     int ret;
+#if is32BitSupported
     if(!is32bit) {
+#endif
         argv[0] = (char *)appExecPath;
         ret = appMain(argc, argv);
+#if is32BitSupported
     } else {
         char *argv32[] = {(char*)appExecPath, (char*)*path, NULL};
         ret = appMain(sizeof(argv32)/sizeof(*argv32) - 1, argv32);
     }
-
+#endif
     return [NSString stringWithFormat:@"App returned from its main function with code %d.", ret];
 }
 
@@ -609,8 +631,8 @@ int LiveContainerMain(int argc, char *argv[]) {
         [lcUserDefaults removeObjectForKey:@"selected"];
         [lcUserDefaults removeObjectForKey:@"selectedContainer"];
         
-        if([runningLC isEqualToString:@"liveprocess"]) {
-            runningLC = @"livecontainer";
+        if([runningLC hasSuffix:@"liveprocess"]) {
+            runningLC = runningLC.stringByDeletingPathExtension;
         }
         
         NSString* selectedAppBackUp = selectedApp;

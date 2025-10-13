@@ -7,6 +7,8 @@
 
 UIInterfaceOrientation LCOrientationLock = UIInterfaceOrientationUnknown;
 NSMutableArray<NSString*>* LCSupportedUrlSchemes = nil;
+NSArray<NSString*>* LCUrlSchemes = nil;
+NSUUID* idForVendorUUID = nil;
 
 __attribute__((constructor))
 static void UIKitGuestHooksInit() {
@@ -18,7 +20,6 @@ static void UIKitGuestHooksInit() {
     swizzle(UIScene.class, @selector(scene:didReceiveActions:fromTransitionContext:), @selector(hook_scene:didReceiveActions:fromTransitionContext:));
     swizzle(UIScene.class, @selector(openURL:options:completionHandler:), @selector(hook_openURL:options:completionHandler:));
     NSInteger LCOrientationLockDirection = [NSUserDefaults.guestAppInfo[@"LCOrientationLock"] integerValue];
-    
     if([UIDevice.currentDevice userInterfaceIdiom] == UIUserInterfaceIdiomPhone) {
         switch (LCOrientationLockDirection) {
             case 1:
@@ -39,7 +40,18 @@ static void UIKitGuestHooksInit() {
         }
 
     }
+    NSDictionary* guestContainerInfo = [NSUserDefaults guestContainerInfo];
+    if(guestContainerInfo[@"spoofIdentifierForVendor"]) {
+        NSString* idForVendorStr = guestContainerInfo[@"spoofedIdentifierForVendor"];
+        if([idForVendorStr isKindOfClass:NSString.class]) {
+            idForVendorUUID = [[NSUUID UUID] initWithUUIDString:idForVendorStr];
+            if(idForVendorUUID) {
+                swizzle(UIDevice.class, @selector(identifierForVendor), @selector(hook_identifierForVendor));
+            }
+        }
+    }
 
+    LCUrlSchemes = @[@"livecontainer", @"livecontainer2", @"livecontainer3"];
 }
 
 NSString* findDefaultContainerWithBundleId(NSString* bundleId) {
@@ -59,25 +71,45 @@ NSString* findDefaultContainerWithBundleId(NSString* bundleId) {
     return infoDict[@"LCDataUUID"];
 }
 
+void forEachInstalledNotCurrentLC(BOOL isFree, void (^block)(NSString* scheme, BOOL* isBreak)) {
+    for(NSString* scheme in LCUrlSchemes) {
+        if([scheme isEqualToString:NSUserDefaults.lcAppUrlScheme]) {
+            continue;
+        }
+        BOOL isInstalled = [UIApplication.sharedApplication canOpenURL:[NSURL URLWithString: [NSString stringWithFormat: @"%@://", scheme]]];
+        if(!isInstalled) {
+            continue;
+        }
+        BOOL isBreak = false;
+        if(isFree && [NSClassFromString(@"LCSharedUtils") isLCSchemeInUse:scheme]) {
+            continue;
+        }
+        block(scheme, &isBreak);
+        if(isBreak) {
+            return;
+        }
+    }
+}
 
 void LCShowSwitchAppConfirmation(NSURL *url, NSString* bundleId, bool isSharedApp) {
     NSURLComponents* newUrlComp = [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
     
-    BOOL canOpenInLC2 = isSharedApp && [NSUserDefaults.lcAppUrlScheme isEqualToString:@"livecontainer"] && [UIApplication.sharedApplication canOpenURL:[NSURL URLWithString: @"livecontainer2://"]];
-    if(canOpenInLC2 && ![NSClassFromString(@"LCSharedUtils") isLCSchemeInUse:@"livecontainer2"]) {
-        newUrlComp.scheme = @"livecontainer2";
-        [UIApplication.sharedApplication openURL:newUrlComp.URL options:@{} completionHandler:nil];
-        return;
+    // check if there's any free LiveContainer to run the app
+    if(isSharedApp) {
+        __block BOOL anotherLCLaunched = false;
+        forEachInstalledNotCurrentLC(YES, ^(NSString * scheme, BOOL* isBreak) {
+            newUrlComp.scheme = scheme;
+            [UIApplication.sharedApplication openURL:newUrlComp.URL options:@{} completionHandler:nil];
+            *isBreak = YES;
+            anotherLCLaunched = YES;
+            return;
+        });
+        if(anotherLCLaunched) {
+            return;
+        }
     }
     
-    
-    BOOL canOpenInLC3 = isSharedApp && [NSUserDefaults.lcAppUrlScheme isEqualToString:@"livecontainer"] && [UIApplication.sharedApplication canOpenURL:[NSURL URLWithString: @"livecontainer3://"]];
-    if(canOpenInLC2 && ![NSClassFromString(@"LCSharedUtils") isLCSchemeInUse:@"livecontainer3"]) {
-        newUrlComp.scheme = @"livecontainer3";
-        [UIApplication.sharedApplication openURL:newUrlComp.URL options:@{} completionHandler:nil];
-        return;
-    }
-    
+    // if LCSwitchAppWithoutAsking is enabled we directly open the app in current lc
     if ([NSUserDefaults.lcUserDefaults boolForKey:@"LCSwitchAppWithoutAsking"]) {
         [NSClassFromString(@"LCSharedUtils") launchToGuestAppWithURL:url];
         return;
@@ -92,22 +124,16 @@ void LCShowSwitchAppConfirmation(NSURL *url, NSString* bundleId, bool isSharedAp
         window.windowScene = nil;
     }];
     [alert addAction:okAction];
-    if(canOpenInLC2) {
-        UIAlertAction* openlc2Action = [UIAlertAction actionWithTitle:@"lc.guestTweak.openInLc2".loc style:UIAlertActionStyleDefault handler:^(UIAlertAction * action) {
-            newUrlComp.scheme = @"livecontainer2";
-            [UIApplication.sharedApplication openURL:newUrlComp.URL options:@{} completionHandler:nil];
-            window.windowScene = nil;
-        }];
-        [alert addAction:openlc2Action];
-    }
-    
-    if(canOpenInLC3) {
-        UIAlertAction* openlc2Action = [UIAlertAction actionWithTitle:@"从第三个LiveContainer打开".loc style:UIAlertActionStyleDefault handler:^(UIAlertAction * action) {
-            newUrlComp.scheme = @"livecontainer3";
-            [UIApplication.sharedApplication openURL:newUrlComp.URL options:@{} completionHandler:nil];
-            window.windowScene = nil;
-        }];
-        [alert addAction:openlc2Action];
+
+    if(isSharedApp) {
+        forEachInstalledNotCurrentLC(NO, ^(NSString * scheme, BOOL* isBreak) {
+            UIAlertAction* openlcAction = [UIAlertAction actionWithTitle:[@"lc.guestTweak.openInLc %@" localizeWithFormat:scheme] style:UIAlertActionStyleDefault handler:^(UIAlertAction * action) {
+                newUrlComp.scheme = scheme;
+                [UIApplication.sharedApplication openURL:newUrlComp.URL options:@{} completionHandler:nil];
+                window.windowScene = nil;
+            }];
+            [alert addAction:openlcAction];
+        });
     }
     
     UIAlertAction* cancelAction = [UIAlertAction actionWithTitle:@"lc.common.cancel".loc style:UIAlertActionStyleCancel handler:^(UIAlertAction * action) {
@@ -178,19 +204,15 @@ void LCOpenWebPage(NSString* webPageUrlString, NSString* originalUrl) {
     }
     
     NSURLComponents* newUrlComp = [NSURLComponents componentsWithString:originalUrl];
-    
-    
-    BOOL canOpenInLC2 = [NSUserDefaults.lcAppUrlScheme isEqualToString:@"livecontainer"] && [UIApplication.sharedApplication canOpenURL:[NSURL URLWithString: @"livecontainer2://"]];
-    if(canOpenInLC2 && ![NSClassFromString(@"LCSharedUtils") isLCSchemeInUse:@"livecontainer2"]) {
-        newUrlComp.scheme = @"livecontainer2";
+    __block BOOL anotherLCLaunched = false;
+    forEachInstalledNotCurrentLC(YES, ^(NSString * scheme, BOOL* isBreak) {
+        newUrlComp.scheme = scheme;
         [UIApplication.sharedApplication openURL:newUrlComp.URL options:@{} completionHandler:nil];
+        *isBreak = YES;
+        anotherLCLaunched = YES;
         return;
-    }
-    
-    BOOL canOpenInLC3 = [NSUserDefaults.lcAppUrlScheme isEqualToString:@"livecontainer"] && [UIApplication.sharedApplication canOpenURL:[NSURL URLWithString: @"livecontainer3://"]];
-    if(canOpenInLC3 && ![NSClassFromString(@"LCSharedUtils") isLCSchemeInUse:@"livecontainer3"]) {
-        newUrlComp.scheme = @"livecontainer3";
-        [UIApplication.sharedApplication openURL:newUrlComp.URL options:@{} completionHandler:nil];
+    });
+    if(anotherLCLaunched) {
         return;
     }
     
@@ -206,23 +228,15 @@ void LCOpenWebPage(NSString* webPageUrlString, NSString* originalUrl) {
         openUniversalLink(webPageUrlString);
         window.windowScene = nil;
     }];
-    if(canOpenInLC2) {
-        UIAlertAction* openlc2Action = [UIAlertAction actionWithTitle:@"lc.guestTweak.openInLc2".loc style:UIAlertActionStyleDefault handler:^(UIAlertAction * action) {
-            newUrlComp.scheme = @"livecontainer2";
+
+    forEachInstalledNotCurrentLC(NO, ^(NSString * scheme, BOOL* isBreak) {
+        UIAlertAction* openlc2Action = [UIAlertAction actionWithTitle:[@"lc.guestTweak.openInLc %@" localizeWithFormat:scheme] style:UIAlertActionStyleDefault handler:^(UIAlertAction * action) {
+            newUrlComp.scheme = scheme;
             [UIApplication.sharedApplication openURL:newUrlComp.URL options:@{} completionHandler:nil];
             window.windowScene = nil;
         }];
         [alert addAction:openlc2Action];
-    }
-    
-    if(canOpenInLC3) {
-        UIAlertAction* openlc2Action = [UIAlertAction actionWithTitle:@"从第三个LiveContainer打开".loc style:UIAlertActionStyleDefault handler:^(UIAlertAction * action) {
-            newUrlComp.scheme = @"livecontainer3";
-            [UIApplication.sharedApplication openURL:newUrlComp.URL options:@{} completionHandler:nil];
-            window.windowScene = nil;
-        }];
-        [alert addAction:openlc2Action];
-    }
+    });
     
     [alert addAction:openNowAction];
     UIAlertAction* cancelAction = [UIAlertAction actionWithTitle:@"lc.common.cancel".loc style:UIAlertActionStyleCancel handler:^(UIAlertAction * action) {
@@ -305,8 +319,8 @@ void handleLiveContainerLaunch(NSURL* url) {
         NSString* runningLC = [NSClassFromString(@"LCSharedUtils") getContainerUsingLCSchemeWithFolderName:containerFolderName];
         // the app is running in an lc, that lc is not me, also is not my avatar
         if(runningLC) {
-            if([runningLC isEqualToString:@"liveprocess"]) {
-                runningLC = @"livecontainer";
+            if([runningLC hasSuffix:@"liveprocess"]) {
+                runningLC = runningLC.stringByDeletingPathExtension;
             }
             NSString* urlStr = [NSString stringWithFormat:@"%@://livecontainer-launch?bundle-name=%@&container-folder-name=%@", runningLC, bundleName, containerFolderName];
             [UIApplication.sharedApplication openURL:[NSURL URLWithString:urlStr] options:@{} completionHandler:nil];
@@ -621,4 +635,12 @@ BOOL canAppOpenItself(NSURL* url) {
         }
     }
 }
+@end
+
+@implementation UIDevice(hook)
+
+- (NSUUID*)hook_identifierForVendor {
+    return idForVendorUUID;
+}
+
 @end

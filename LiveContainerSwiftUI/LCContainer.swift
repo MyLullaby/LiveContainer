@@ -13,6 +13,14 @@ class LCContainer : ObservableObject, Hashable {
     @Published var name : String
     @Published var isShared : Bool
     @Published var isolateAppGroup : Bool
+    @Published var spoofIdentifierForVendor : Bool {
+        didSet {
+            if spoofIdentifierForVendor && spoofedIdentifier == nil {
+                spoofedIdentifier = UUID().uuidString
+            }
+        }
+    }
+    public var spoofedIdentifier: String?
     private var infoDict : [String:Any]?
     public var containerURL : URL {
         if isShared {
@@ -48,26 +56,43 @@ class LCContainer : ObservableObject, Hashable {
         }
     }
     
-    init(folderName: String, name: String, isShared : Bool, isolateAppGroup: Bool) {
+    init(folderName: String, name: String, isShared : Bool, isolateAppGroup: Bool = false, spoofIdentifierForVendor: Bool = false) {
         self.folderName = folderName
         self.name = name
         self.isShared = isShared
         self.isolateAppGroup = isolateAppGroup
+        self.spoofIdentifierForVendor = spoofIdentifierForVendor
     }
     
     convenience init(infoDict : [String : Any], isShared : Bool) {
         self.init(folderName: infoDict["folderName"] as? String ?? "ERROR",
                   name: infoDict["name"] as? String ?? "ERROR",
                   isShared: isShared,
-                  isolateAppGroup: infoDict["isolateAppGroup"] as? Bool ?? false
+                  isolateAppGroup: infoDict["isolateAppGroup"] as? Bool ?? false,
+                  spoofIdentifierForVendor: infoDict["spoofIdentifierForVendor"] as? Bool ?? false
         )
+        do {
+            let fm = FileManager.default
+            if(!fm.fileExists(atPath: infoDictUrl.deletingLastPathComponent().path)) {
+                try fm.createDirectory(at: infoDictUrl.deletingLastPathComponent(), withIntermediateDirectories: true)
+            }
+            
+            let plistInfo = try PropertyListSerialization.propertyList(from: Data(contentsOf: infoDictUrl), format: nil)
+            if let plistInfo = plistInfo as? [String : Any] {
+                isolateAppGroup = plistInfo["isolateAppGroup"] as? Bool ?? false
+                spoofIdentifierForVendor = plistInfo["spoofIdentifierForVendor"] as? Bool ?? false
+            }
+        } catch {
+            
+        }
+
+        spoofedIdentifier = infoDict["spoofedIdentifierForVendor"] as? String
     }
     
     func toDict() -> [String : Any] {
         return [
             "folderName" : folderName,
-            "name" : name,
-            "isolateAppGroup" : isolateAppGroup
+            "name" : name
         ]
     }
     
@@ -77,17 +102,23 @@ class LCContainer : ObservableObject, Hashable {
             "name" : name,
             "keychainGroupId" : keychainGroupId,
             "isolateAppGroup" : isolateAppGroup,
+            "spoofIdentifierForVendor": spoofIdentifierForVendor
         ]
+        if let spoofedIdentifier {
+            infoDict!["spoofedIdentifierForVendor"] = spoofedIdentifier
+        }
+        
         do {
             let fm = FileManager.default
             if(!fm.fileExists(atPath: infoDictUrl.deletingLastPathComponent().path)) {
                 try fm.createDirectory(at: infoDictUrl.deletingLastPathComponent(), withIntermediateDirectories: true)
             }
+            
+            let plistData = try PropertyListSerialization.data(fromPropertyList: infoDict as Any, format: .binary, options: 0)
+            try plistData.write(to: infoDictUrl)
         } catch {
             
         }
-        
-        (infoDict! as NSDictionary).write(to: infoDictUrl, atomically: true)
     }
     
     func reloadInfoPlist() {
@@ -103,6 +134,8 @@ class LCContainer : ObservableObject, Hashable {
         }
         name = infoDict["name"] as? String ?? "ERROR"
         isolateAppGroup = infoDict["isolateAppGroup"] as? Bool ?? false
+        spoofIdentifierForVendor = infoDict["spoofIdentifierForVendor"] as? Bool ?? false
+        spoofedIdentifier = infoDict["spoofedIdentifierForVendor"] as? String
     }
     
     static func == (lhs: LCContainer, rhs: LCContainer) -> Bool {
@@ -123,7 +156,8 @@ extension LCAppInfo {
                 containerInfo = [[
                     "folderName": oldDataUUID,
                     "name": oldDataUUID,
-                    "isolateAppGroup": false
+                    "isolateAppGroup": false,
+                    "spoofIdentifierForVendor": false
                 ]]
                 upgrade = true
             }
