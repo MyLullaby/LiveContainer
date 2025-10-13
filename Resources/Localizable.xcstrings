@@ -20618,6 +20618,23 @@
         }
       }
     },
+    "lc.settings.multiLCInstall.allowGameMode" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow Game Mode"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cho phép Chế độ Trò chơi"
+          }
+        }
+      }
+    },
     "lc.settings.multiLCInstall.installWithBuiltInSideStore" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -20691,6 +20708,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用内置SideStore安装"
+          }
+        }
+      }
+    },
+    "lc.settings.multiLCInstall.useGameCategory" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set Category as Game"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đặt Danh mục là Trò chơi"
           }
         }
       }
