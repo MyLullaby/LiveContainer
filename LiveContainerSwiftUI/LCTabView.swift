@@ -8,6 +8,14 @@
 import Foundation
 import SwiftUI
 
+public enum LCTabIdentifier: Hashable {
+    case sources
+    case apps
+    case tweaks
+    case settings
+    case search
+}
+
 struct LCTabView: View {
     @Binding var appDataFolderNames: [String]
     @Binding var tweakFolderNames: [String]
@@ -15,50 +23,75 @@ struct LCTabView: View {
     @State var errorShow = false
     @State var errorInfo = ""
     
+    @State var previousSelectedTab : LCTabIdentifier = .apps
+    
     @EnvironmentObject var sharedModel : SharedModel
     @EnvironmentObject var sceneDelegate: SceneDelegate
     @State var shouldToggleMainWindowOpen = false
     @Environment(\.scenePhase) var scenePhase
     let pub = NotificationCenter.default.publisher(for: UIScene.didDisconnectNotification)
+
     
     var body: some View {
         Group {
             let appListView = LCAppListView(appDataFolderNames: $appDataFolderNames, tweakFolderNames: $tweakFolderNames)
+            let sourcesView = LCSourcesView()
             if #available(iOS 19.0, *), SharedModel.isLiquidGlassSearchEnabled {
-                TabView {
-                    Tab("lc.tabView.apps".loc, systemImage: "square.stack.3d.up.fill") {
+                TabView(selection: $sharedModel.selectedTab) {
+                    if DataManager.shared.model.multiLCStatus != 2 {
+                        Tab("lc.tabView.sources".loc, systemImage: "books.vertical", value: LCTabIdentifier.sources) {
+                            sourcesView
+                        }
+                    }
+                    Tab("lc.tabView.apps".loc, systemImage: "square.stack.3d.up.fill", value: LCTabIdentifier.apps) {
                         appListView
                     }
                     if DataManager.shared.model.multiLCStatus != 2 {
-                        Tab("lc.tabView.tweaks".loc, systemImage: "wrench.and.screwdriver") {
+                        Tab("lc.tabView.tweaks".loc, systemImage: "wrench.and.screwdriver", value: LCTabIdentifier.tweaks) {
                             LCTweaksView(tweakFolders: $tweakFolderNames)
                         }
                     }
-                    Tab("lc.tabView.settings".loc, systemImage: "gearshape.fill") {
+                    Tab("lc.tabView.settings".loc, systemImage: "gearshape.fill", value: LCTabIdentifier.settings) {
                         LCSettingsView(appDataFolderNames: $appDataFolderNames)
                     }
-                    Tab("Search".loc, systemImage: "magnifyingglass", role: .search) {
-                        appListView
-                            .searchable(text: appListView.$searchContext.query)
+                    Tab("Search".loc, systemImage: "magnifyingglass", value: LCTabIdentifier.search, role: .search) {
+                        if previousSelectedTab == .sources {
+                            sourcesView
+                                .searchable(text: sourcesView.$searchContext.query)
+                        } else {
+                            appListView
+                                .searchable(text: appListView.$searchContext.query)
+                        }
+
                     }
                 }
             } else {
-                TabView {
+                TabView(selection: $sharedModel.selectedTab) {
+                    if DataManager.shared.model.multiLCStatus != 2 {
+                        sourcesView
+                            .tabItem {
+                                Label("lc.tabView.sources".loc, systemImage: "books.vertical")
+                            }
+                            .tag(LCTabIdentifier.sources)
+                    }
                     appListView
                         .tabItem {
                             Label("lc.tabView.apps".loc, systemImage: "square.stack.3d.up.fill")
                         }
+                        .tag(LCTabIdentifier.apps)
                     if DataManager.shared.model.multiLCStatus != 2 {
                         LCTweaksView(tweakFolders: $tweakFolderNames)
                             .tabItem{
                                 Label("lc.tabView.tweaks".loc, systemImage: "wrench.and.screwdriver")
                             }
+                            .tag(LCTabIdentifier.tweaks)
                     }
                     
                     LCSettingsView(appDataFolderNames: $appDataFolderNames)
                         .tabItem {
                             Label("lc.tabView.settings".loc, systemImage: "gearshape.fill")
                         }
+                        .tag(LCTabIdentifier.settings)
                 }
             }
         }
@@ -83,6 +116,11 @@ struct LCTabView: View {
                 if shouldToggleMainWindowOpen {
                     DataManager.shared.model.mainWindowOpened = false
                 }
+            }
+        }
+        .onChange(of: sharedModel.selectedTab) { newValue in
+            if newValue != LCTabIdentifier.search {
+                previousSelectedTab = newValue
             }
         }
     }

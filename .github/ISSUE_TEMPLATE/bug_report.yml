@@ -30,6 +30,20 @@ body:
       description: To retrieve LiveContainer version, go to LiveContainer settings, then scroll to the bottom of the page.
     validations:
       required: true
+  - type: checkboxes
+    attributes:
+      label: Verify steps
+      options:
+        - label: I downloaded LiveContainer from releases / actions section or LiveContainer's AltStore source.
+        - label: I have the latest LiveContainer.
+        - label: I installed LiveContainer through AltStore/SideStore/TrollStore or I'm confident that I signed LiveContainer correctly with all required entitlements.
+    validations:
+      required: true
+  - type: textarea
+    id: crash-log
+    attributes:
+      label: Crash Log
+      description: If a crash happened, please upload the crash log in iOS settings - Privacy Security - Analytics Improvements - Analytics Data - Search LiveContainer. **Do not copy and paste.** Instead, please change .ips to .txt and upload it.
   - type: textarea
     id: other-info
     attributes:
