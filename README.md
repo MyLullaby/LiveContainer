@@ -14,8 +14,17 @@
 # LiveContainer
 
 - LiveContainer is an app launcher (not emulator or hypervisor) that allows you to run iOS apps inside it.
-- Allows you to install unlimited apps (3 app/10 app id free developer account limit does not apply here!), can have multiple versions of an app installed with multiple data containers.
-- When JIT is available, codesign is entirely bypassed, no need to sign your apps before installing. Otherwise, app will be signed with the same certificate used by LiveContainer.
+- Allows you to install unlimited apps (3 app/10 app id free developer account limit does not apply here) with only one app & app id. You can also have multiple versions of an app installed with multiple data containers.
+- When JIT is available, codesign is entirely bypassed, no need to sign your apps before installing. Otherwise, your app will be signed with the same certificate used by LiveContainer.
+
+> [!CAUTION]
+> **Important Notice Regarding Third-Party Builds of LiveContainer**
+>
+> We have recently noticed the appearance of certain closed-source third-party builds of LiveContainer. Please be aware that all your apps are installed within LiveContainer, which means these third-party builds **have full access to your data, including sensitive information such as keychain items and login credentials**. 
+>
+> For instance, if you log into YouTube within such a LiveContainer, the third-party build will have complete access to your YouTube (Google) account credentials. Please avoid using these closed-source builds unless you have absolute trust in their developers or are able to personally review the source code and build yourself. 
+> 
+> Furthermore, please note that we do not provide any support for issues of these third-party builds.
 
 >[!Note]
 It’s recommended to follow the following steps to set up JIT-Less mode for using LiveContainer without JIT. If you encounter any issues, please review #265 first before reporting them.
@@ -31,16 +40,23 @@ It’s recommended to follow the following steps to set up JIT-Less mode for usi
 
 ## Downloads
 ### Stable:
-  [AltSource (raw)](https://raw.githubusercontent.com/LiveContainer/LiveContainer/refs/heads/main/apps.json) 
-  ([Add to AltStore](https://intradeus.github.io/http-protocol-redirector?r=altstore://source?url=https://raw.githubusercontent.com/LiveContainer/LiveContainer/refs/heads/main/apps.json), 
-  [Add to SideStore](https://intradeus.github.io/http-protocol-redirector?r=sidestore://source?url=https://raw.githubusercontent.com/LiveContainer/LiveContainer/refs/heads/main/apps.json)), [IPA download](https://github.com/LiveContainer/LiveContainer/releases/latest/download/LiveContainer.ipa)
+<a href="https://celloserenity.github.io/altdirect/?url=https://raw.githubusercontent.com/LiveContainer/LiveContainer/refs/heads/main/apps.json&exclude=livecontainer" target="_blank">
+   <img src="https://github.com/CelloSerenity/altdirect/blob/main/assets/png/AltSource_Blue.png?raw=true" alt="Add AltSource" width="200">
+</a>
+<a href="https://github.com/LiveContainer/LiveContainer/releases/latest/download/LiveContainer.ipa" target="_blank">
+   <img src="https://github.com/CelloSerenity/altdirect/blob/main/assets/png/Download_Blue.png?raw=true" alt="Download .ipa" width="200">
+</a>
 
 ### Nightly:
-  [AltSource (raw)](https://github.com/LiveContainer/LiveContainer/releases/download/nightly/apps_nightly.json) ([Add to AltStore](https://intradeus.github.io/http-protocol-redirector?r=altstore://source?url=https://github.com/LiveContainer/LiveContainer/releases/download/nightly/apps_nightly.json), [Add to SideStore](https://intradeus.github.io/http-protocol-redirector?r=sidestore://source?url=https://github.com/LiveContainer/LiveContainer/releases/download/nightly/apps_nightly.json)), [IPA download](https://github.com/LiveContainer/LiveContainer/releases/download/nightly/LiveContainer.ipa)
-
-- It is recommended to setup JIT-Less mode, in which LiveContainer signs your apps with your certificate from AltStore/SideStore (see the instructions below).
+<a href="https://celloserenity.github.io/altdirect/?url=https://github.com/LiveContainer/LiveContainer/releases/download/nightly/apps_nightly.json&exclude=livecontainer" target="_blank">
+   <img src="https://github.com/CelloSerenity/altdirect/blob/main/assets/png/AltSource_Blue.png?raw=true" alt="Add AltSource" width="200">
+</a>
+<a href="https://github.com/LiveContainer/LiveContainer/releases/download/nightly/LiveContainer.ipa" target="_blank">
+   <img src="https://github.com/CelloSerenity/altdirect/blob/main/assets/png/Download_Blue.png?raw=true" alt="Download .ipa" width="200">
+</a>
 
 ## Installation
+- It is recommended to setup JIT-Less mode, in which LiveContainer signs your apps with your certificate from AltStore/SideStore (see the instructions below).
 
 ### JIT-Less mode (Without JIT \[recommended])
 These steps can be bypassed if you don't mind enabling JIT for your app every time, but it is not recommended. Without JIT, guest apps need to be codesigned, which requires retrieving the certificate and password from AltStore/SideStore.
@@ -86,11 +102,11 @@ To use multitasking:
 2. Hold its banner and tap **"Multitask"**.
 
 >[!Note]
->1. To use multitasking, ensure you select **"Keep Extension"** when installing via SideStore/AltStore.  
->2. If you want to enable JIT for multitasked apps, you’ll need a JIT enabler that supports attaching by PID.
+>1. To use multitasking, ensure you select **"Keep App Extensions"** when installing via SideStore/AltStore.  
+>2. If you want to enable JIT for multitasked apps, you’ll need a JIT enabler that supports attaching by PID. (StikDebug)
 
 ### Fix File Picker & Local Notification
-Some apps may experience issues with their file pickers or not be able to apply for notification permission in LiveContainer. To resolve this, enable "Fix File Picker & Local Notification" in the app-specific settings.
+Some apps may experience issues with their file pickers or not be able to apply for notification permission in LiveContainer. To resolve this, enable "Fix File Picker" & "Fix Local Notifications" accordingly in the app-specific settings.
 
 ### "Open In App" Support
 - Tap the link icon in the top-right corner of the "Apps" tab and input the URL. LiveContainer will detect the appropriate app and ask if you want to launch it.
@@ -203,9 +219,11 @@ Open Xcode, edit `DEVELOPMENT_TEAM[config=Debug]` in `xcconfigs/Global.xcconfig`
 - [xpn's blogpost: Restoring Dyld Memory Loading](https://blog.xpnsec.com/restoring-dyld-memory-loading)
 - [LinusHenze's CFastFind](https://github.com/pinauten/PatchfinderUtils/blob/master/Sources/CFastFind/CFastFind.c): [MIT license](https://github.com/pinauten/PatchfinderUtils/blob/master/LICENSE)
 - [litehook](https://github.com/opa334/litehook): [MIT license](https://github.com/opa334/litehook/blob/main/LICENSE)
-- @haxi0 for icon
+- @haxi0 & @m1337v for icon
 - @Vishram1123 for the initial shortcut implementation.
 - @hugeBlack for SwiftUI contribution
 - @Staubgeborener for automatic AltStore/SideStore source updater
 - @fkunn1326 for improved app hiding
 - @slds1 for dynamic color feature
+- @Vishram1123 for iOS 26+ JIT Script Support
+- @StephenDev0 for AltStore source support
