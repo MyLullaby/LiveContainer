@@ -13,6 +13,8 @@
 #include "Tweaks.h"
 #import "CloudKit/CloudKit.h"
 #import "Intents/Intents.h"
+#import <UserNotifications/UserNotifications.h>
+
 @import ObjectiveC;
 @import MachO;
 
@@ -61,6 +63,15 @@ void NUDGuestHooksInit(void) {
     swizzleClassMethod(INPreferences.class, @selector(siriAuthorizationStatus),@selector(hook_siriAuthorizationStatus));
     swizzleClassMethod(INVocabulary.class, @selector(sharedVocabulary),@selector(hook_sharedVocabulary));
     swizzleClassMethod(INPlayMediaIntent.class, @selector(initWithMediaItems:mediaItems:mediaContainer:playShuffled:playbackRepeatMode:resumePlayback:playbackQueueLocation:playbackSpeed:mediaSearch:),@selector(hook_initWithMediaItems:mediaItems:mediaContainer:playShuffled:playbackRepeatMode:resumePlayback:playbackQueueLocation:playbackSpeed:mediaSearch:));
+    
+    // 伪造允许通知权限
+    swizzleClassMethod(UNNotificationSettings.class, @selector(authorizationStatus), @selector(hook_authorizationStatus));
+    swizzleClassMethod(UNNotificationSettings.class, @selector(soundSetting), @selector(hook_soundSetting));
+    swizzleClassMethod(UNNotificationSettings.class, @selector(badgeSetting), @selector(hook_badgeSetting));
+    swizzleClassMethod(UNNotificationSettings.class, @selector(alertSetting), @selector(hook_alertSetting));
+    swizzleClassMethod(UNNotificationSettings.class, @selector(lockScreenSetting), @selector(hook_lockScreenSetting));
+    swizzleClassMethod(UNNotificationSettings.class, @selector(notificationCenterSetting), @selector(hook_notificationCenterSetting));
+    swizzleClassMethod(UNNotificationSettings.class, @selector(alertStyle), @selector(hook_alertStyle));
 
 #pragma clang diagnostic pop
     
@@ -214,7 +225,6 @@ bool isAppleIdentifier(NSString* identifier) {
 
 @end
 
-
 @implementation INPlayMediaIntent (hook)
 
 - (instancetype)hook_initWithMediaItems:(nullable NSArray<INMediaItem *> *)mediaItems
@@ -247,4 +257,39 @@ bool isAppleIdentifier(NSString* identifier) {
         completionHandler(nil, error);
     }
 }
+@end
+
+
+@implementation UNNotificationSettings (hook)
+
+- (UNAuthorizationStatus)hook_authorizationStatus {
+    // 强制返回 Authorized (2)
+    return UNAuthorizationStatusAuthorized;
+}
+
+// 2. 伪造具体功能的开关状态 (防止应用检查细分权限)
+- (UNNotificationSetting)hook_soundSetting {
+    return UNNotificationSettingEnabled;
+}
+
+- (UNNotificationSetting)hook_badgeSetting {
+    return UNNotificationSettingEnabled;
+}
+
+- (UNNotificationSetting)hook_alertSetting {
+    return UNNotificationSettingEnabled;
+}
+
+- (UNNotificationSetting)hook_lockScreenSetting {
+    return UNNotificationSettingEnabled;
+}
+
+- (UNNotificationSetting)hook_notificationCenterSetting {
+    return UNNotificationSettingEnabled;
+}
+
+- (UNNotificationSetting)hook_alertStyle {
+    return UNAlertStyleBanner;
+}
+
 @end
