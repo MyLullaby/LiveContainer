@@ -23,6 +23,7 @@ typedef NS_ENUM(NSInteger, LCOrientationLock){
 @property bool dontLoadTweakLoader;
 @property bool dontInjectTweakLoader;
 @property UIColor* cachedColor;
+@property UIColor* cachedColorDark;
 @property LCOrientationLock orientationLock;
 @property bool fixFilePickerNew;
 @property bool fixLocalNotification;
@@ -37,12 +38,14 @@ typedef NS_ENUM(NSInteger, LCOrientationLock){
 @property (nonatomic, strong) NSString* jitLaunchScriptJs;
 @property NSDate* lastLaunched;
 @property NSDate* installationDate;
+@property NSString* remark;
 #if is32BitSupported
 @property bool is32bit;
 #endif
 - (void)setBundlePath:(NSString*)newBundlePath;
 - (NSMutableDictionary*)info;
-- (UIImage*)icon;
+- (UIImage*)iconIsDarkIcon:(BOOL)isDarkIcon;
+- (void)clearIconCache;
 - (NSString*)displayName;
 - (NSString*)bundlePath;
 - (NSString*)bundleIdentifier;

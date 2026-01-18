@@ -105,6 +105,12 @@ class LCAppModel: ObservableObject, Hashable {
         }
     }
     
+    @Published var uiRemark : String {
+        didSet {
+            appInfo.remark = uiRemark
+        }
+    }
+    
     @Published var supportedLanguages : [String]?
     
     var delegate : LCAppModelDelegate?
@@ -137,6 +143,7 @@ class LCAppModel: ObservableObject, Hashable {
         self.uiDontSign = appInfo.dontSign
         self.jitLaunchScriptJs = appInfo.jitLaunchScriptJs
         self.uiSpoofSDKVersion = appInfo.spoofSDKVersion
+        self.uiRemark = appInfo.remark ?? ""
 #if is32BitSupported
         self.uiIs32bit = appInfo.is32bit
 #endif
@@ -161,12 +168,6 @@ class LCAppModel: ObservableObject, Hashable {
             return
         }
         
-        var multitask = multitask
-        
-        if multitask && !uiIsShared {
-            throw "It's not possible to multitask with private apps."
-        }
-        
         if uiContainers.isEmpty {
             let newName = NSUUID().uuidString
             let newContainer = LCContainer(folderName: newName, name: newName, isShared: uiIsShared)
@@ -180,18 +181,13 @@ class LCAppModel: ObservableObject, Hashable {
             uiDefaultDataFolder = newName
         }
         if let containerFolderName {
-            for uiContainer in uiContainers {
-                if uiContainer.folderName == containerFolderName {
-                    uiSelectedContainer = uiContainer
-                    break
-                }
-            }
+            uiSelectedContainer = uiContainers.first { $0.folderName == containerFolderName } ?? uiSelectedContainer
         }
         let currentDataFolder = containerFolderName ?? uiSelectedContainer?.folderName
         
         if multitask,
            let currentDataFolder,
-           bringExistingMultitaskWindowIfNeeded(dataUUID: currentDataFolder) {
+           await bringExistingMultitaskWindowIfNeeded(dataUUID: currentDataFolder) {
             return
         }
         
@@ -217,7 +213,7 @@ class LCAppModel: ObservableObject, Hashable {
         // ask user if they want to terminate all multitasking apps
         if MultitaskManager.isMultitasking() && !multitask {
             if let currentDataFolder,
-               bringExistingMultitaskWindowIfNeeded(dataUUID: currentDataFolder) {
+               await bringExistingMultitaskWindowIfNeeded(dataUUID: currentDataFolder) {
                 return
             }
             
@@ -431,15 +427,17 @@ class LCAppModel: ObservableObject, Hashable {
         
     }
     
-    private func bringExistingMultitaskWindowIfNeeded(dataUUID: String) -> Bool {
+    private func bringExistingMultitaskWindowIfNeeded(dataUUID: String) async -> Bool {
         guard #available(iOS 16.0, *) else { return false }
-        var found = false
-        if #available(iOS 16.1, *) {
-            found = MultitaskWindowManager.openExistingAppWindow(dataUUID: dataUUID)
+        return await MainActor.run {
+            var found = false
+            if #available(iOS 16.1, *) {
+                found = MultitaskWindowManager.openExistingAppWindow(dataUUID: dataUUID)
+            }
+            if !found {
+                found = MultitaskDockManager.shared.bringMultitaskViewToFront(uuid: dataUUID)
+            }
+            return found
         }
-        if !found {
-            found = MultitaskDockManager.shared.bringMultitaskViewToFront(uuid: dataUUID)
-        }
-        return found
     }
 }

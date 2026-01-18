@@ -33,10 +33,14 @@ struct LCAppBanner : View {
     
     @State private var errorShow = false
     @State private var errorInfo = ""
-    @AppStorage("dynamicColors") var dynamicColors = true
+    
+    @AppStorage("dynamicColors", store: LCUtils.appGroupUserDefault) var dynamicColors = true
+    @AppStorage("darkModeIcon", store: LCUtils.appGroupUserDefault) var darkModeIcon = false
     @AppStorage("LCLaunchInMultitaskMode") var launchInMultitaskMode = false
     @State private var mainColor : Color
+    @State private var icon: UIImage
     
+    @Environment(\.colorScheme) var colorScheme
     @EnvironmentObject private var sharedModel : SharedModel
     
     init(appModel: LCAppModel, delegate: LCAppBannerDelegate, appDataFolders: Binding<[String]>, tweakFolders: Binding<[String]>) {
@@ -47,7 +51,9 @@ struct LCAppBanner : View {
         
         _model = ObservedObject(wrappedValue: appModel)
         _mainColor = State(initialValue: Color.clear)
+        _icon = State(initialValue: appModel.appInfo.iconIsDarkIcon(LCUtils.appGroupUserDefault.bool(forKey: "darkModeIcon")))
         _mainColor = State(initialValue: extractMainHueColor())
+
     }
     @State private var mainHueColor: CGFloat? = nil
     
@@ -55,11 +61,14 @@ struct LCAppBanner : View {
 
         HStack {
             HStack {
-                Image(uiImage: appInfo.icon())
+                Image(uiImage: icon)
                     .resizable().resizable().frame(width: 60, height: 60)
-                    .clipShape(RoundedRectangle(cornerSize: CGSize(width:12, height: 12)))
+                    .clipShape(RoundedRectangle(cornerSize: CGSize(width:16, height: 16)))
 
                 VStack (alignment: .leading, content: {
+                    let color = (dynamicColors ? mainColor : Color("FontColor"))
+                    // note: keep this so the color updates when toggling dark mode
+                    let textColor = colorScheme == .dark ? color.readableTextColor() : color.readableTextColor()
                     HStack {
                         Text(appInfo.displayName()).font(.system(size: 16)).bold()
                         if model.uiIsShared {
@@ -102,14 +111,20 @@ struct LCAppBanner : View {
                         }
                     }
 
-                    Text("\(appInfo.version() ?? "?") - \(appInfo.bundleIdentifier() ?? "?")").font(.system(size: 12)).foregroundColor(dynamicColors ? mainColor : Color("FontColor"))
-                    Text(model.uiSelectedContainer?.name ?? "lc.appBanner.noDataFolder".loc).font(.system(size: 8)).foregroundColor(dynamicColors ? mainColor : Color("FontColor"))
+                    Text("\(appInfo.version() ?? "?") - \(appInfo.bundleIdentifier() ?? "?")").font(.system(size: 12)).foregroundColor(textColor)
+                    if !model.uiRemark.isEmpty {
+                        Text(model.uiRemark)
+                            .font(.system(size: 10))
+                            .foregroundColor(textColor.opacity(0.8))
+                            .lineLimit(1)
+                    }
+                    Text(model.uiSelectedContainer?.name ?? "lc.appBanner.noDataFolder".loc).font(.system(size: 8)).foregroundColor(textColor)
                 })
             }
             .allowsHitTesting(false)
             Spacer()
             Button {
-                if #available(iOS 16.0, *), sharedModel.multiLCStatus != 2 && launchInMultitaskMode && model.uiIsShared {
+                if #available(iOS 16.0, *), sharedModel.multiLCStatus != 2 && launchInMultitaskMode {
                      if let currentDataFolder = model.uiSelectedContainer?.folderName,
                         MultitaskManager.isUsing(container: currentDataFolder) {
                          var found = false
@@ -203,23 +218,21 @@ struct LCAppBanner : View {
                         }
                     }
                 }
-                if(model.uiIsShared) {
-                    if #available(iOS 16.0, *) {
-                        Button {
-                            if launchInMultitaskMode {
-                                Task{ await runApp(multitask: false) }
-                            } else {
-                                Task{ await runApp(multitask: true) }
-                            }
-
-                        } label: {
-                            if launchInMultitaskMode {
-                                Label("lc.appBanner.run".loc, systemImage: "play.fill")
-                            } else {
-                                Label("lc.appBanner.multitask".loc, systemImage: "macwindow.badge.plus")
-                            }
-
+                if #available(iOS 16.0, *) {
+                    Button {
+                        if launchInMultitaskMode {
+                            Task{ await runApp(multitask: false) }
+                        } else {
+                            Task{ await runApp(multitask: true) }
                         }
+                        
+                    } label: {
+                        if launchInMultitaskMode {
+                            Label("lc.appBanner.run".loc, systemImage: "play.fill")
+                        } else {
+                            Label("lc.appBanner.multitask".loc, systemImage: "macwindow.badge.plus")
+                        }
+                        
                     }
                 }
                 Menu {
@@ -295,7 +308,10 @@ struct LCAppBanner : View {
         } message: {
             Text(errorInfo)
         }
-        
+        .onChange(of: darkModeIcon) { newVal in
+            icon = appInfo.iconIsDarkIcon(newVal)
+            mainColor = extractMainHueColor()
+        }
     }
     
     func runApp(multitask: Bool) async {
@@ -326,7 +342,7 @@ struct LCAppBanner : View {
     
     
     func openDataFolder() {
-        let url = URL(string:"shareddocuments://\(LCPath.docPath.path)/Data/Application/\(model.uiSelectedContainer!.folderName)")
+        let url = URL(string:"shareddocuments://\(LCPath.dataPath.path)/\(model.uiSelectedContainer!.folderName)")
         UIApplication.shared.open(url!)
     }
     
@@ -399,10 +415,13 @@ struct LCAppBanner : View {
     }
     
     func extractMainHueColor() -> Color {
-        if let cachedColor = appInfo.cachedColor {
+        if !darkModeIcon, let cachedColor = appInfo.cachedColor {
+            return Color(uiColor: cachedColor)
+        } else if darkModeIcon, let cachedColor = appInfo.cachedColorDark {
             return Color(uiColor: cachedColor)
         }
-        guard let cgImage = appInfo.icon().cgImage else { return Color.clear }
+        
+        guard let cgImage = appInfo.iconIsDarkIcon(darkModeIcon).cgImage else { return Color.clear }
 
         let width = 1
         let height = 1
@@ -437,7 +456,12 @@ struct LCAppBanner : View {
         }
         
         let ans = Color(hue: hue, saturation: saturation, brightness: brightness)
-        appInfo.cachedColor = UIColor(ans)
+        if darkModeIcon {
+            appInfo.cachedColorDark = UIColor(ans)
+        } else {
+            appInfo.cachedColor = UIColor(ans)
+        }
+        
         
         return ans
     }

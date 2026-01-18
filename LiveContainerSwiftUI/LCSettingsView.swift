@@ -37,7 +37,8 @@ struct LCSettingsView: View {
     @AppStorage("LCOpenWebPageWithoutAsking") var silentOpenWebPage = false
     @AppStorage("LCDontSignApp", store: LCUtils.appGroupUserDefault) var dontSignApp = false
     @AppStorage("LCStrictHiding", store: LCUtils.appGroupUserDefault) var strictHiding = false
-    @AppStorage("dynamicColors") var dynamicColors = true
+    @AppStorage("dynamicColors", store: LCUtils.appGroupUserDefault) var dynamicColors = true
+    @AppStorage("darkModeIcon", store: LCUtils.appGroupUserDefault) var darkModeIcon = false
     
     @AppStorage("LCSideJITServerAddress", store: LCUtils.appGroupUserDefault) var sideJITServerAddress : String = ""
     @AppStorage("LCDeviceUDID", store: LCUtils.appGroupUserDefault) var deviceUDID: String = ""
@@ -50,6 +51,7 @@ struct LCSettingsView: View {
     @AppStorage("LCAutoEndPiP", store: LCUtils.appGroupUserDefault) var autoEndPiP = false
     @AppStorage("LCSkipTerminatedScreen", store: LCUtils.appGroupUserDefault) var skipTerminatedScreen = false
     @AppStorage("LCRestartTerminatedApp", store: LCUtils.appGroupUserDefault) var restartTerminatedApp = false
+    @AppStorage("LCMaxOneAppOnStage", store: LCUtils.appGroupUserDefault) var onlyOneAppOnStage = false
     @AppStorage("LCDockWidth", store: LCUtils.appGroupUserDefault) var dockWidth: Double = 80
     
     @State var store : Store = .Unknown
@@ -61,6 +63,7 @@ struct LCSettingsView: View {
     #endif
     @AppStorage("LCKeepSelectedWhenQuit") var keepSelectedWhenQuit = false
     @AppStorage("LCWaitForDebugger") var waitForDebugger = false
+    @AppStorage("LCSharePrivateDataWithLiveProcess") var sharePrivateDataWithLiveProcess = false
     
     @EnvironmentObject private var sharedModel : SharedModel
     
@@ -179,6 +182,12 @@ struct LCSettingsView: View {
                     Toggle(isOn: $dynamicColors) {
                         Text("lc.settings.dynamicColors".loc)
                     }
+                    if #available(iOS 18.0, *) {
+                        Toggle(isOn: $darkModeIcon) {
+                            Text("lc.settings.darkModeIcon".loc)
+                        }
+                    }
+                    
                 } header: {
                     Text("lc.settings.interface".loc)
                 } footer: {
@@ -237,6 +246,11 @@ struct LCSettingsView: View {
                         if multitaskMode == .virtualWindow {
                             Toggle(isOn: $launchMultitaskMaximized) {
                                 Text("lc.settings.launchMultitaskMaximized".loc)
+                            }
+                            if launchMultitaskMaximized {
+                                Toggle(isOn: $onlyOneAppOnStage) {
+                                    Text("lc.settings.onlyOneAppOnStage".loc)
+                                }
                             }
                             Toggle(isOn: $autoEndPiP) {
                                 Text("lc.settings.autoEndPiP".loc)
@@ -339,6 +353,9 @@ struct LCSettingsView: View {
                         Toggle(isOn: $waitForDebugger) {
                             Text("Wait For Debugger")
                         }
+                        Toggle(isOn: $sharePrivateDataWithLiveProcess) {
+                            Text("Allow Private Data access from LiveProcess")
+                        }
                         Button {
                             export()
                         } label: {
@@ -364,6 +381,12 @@ struct LCSettingsView: View {
                         } label: {
                             Text("Reset Symbol Offsets")
                         }
+                        Button {
+                            presentFLEXOverlay()
+                        } label: {
+                            Text("Show FLEX Overlay")
+                        }
+                        .disabled(NSClassFromString("FLEXManager") == nil)
                         #if is32BitSupported
                         HStack {
                             Text("LiveExec32 .app path")
@@ -522,6 +545,12 @@ struct LCSettingsView: View {
     
     func resetSymbolOffsets() {
         LCUtils.appGroupUserDefault.removeObject(forKey: "symbolOffsetCache")
+    }
+    
+    func presentFLEXOverlay() {
+        let manager = (NSClassFromString("FLEXManager") as? NSObject.Type)?.perform(NSSelectorFromString("sharedManager"))
+            .takeUnretainedValue() as? NSObject
+        manager?.perform(NSSelectorFromString("showExplorer"))
     }
     
     func importCertificate() async {

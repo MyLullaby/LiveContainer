@@ -49,6 +49,7 @@ int dyld_get_program_sdk_version(void);
 + (NSString *)storeInstallURLScheme;
 + (NSString *)getVersionInfo;
 + (NSString *)liveProcessBundleIdentifier;
++ (NSData*)bookmarkForURL:(NSURL*) url;
 @end
 
 @interface NSUserDefaults(LiveContainer)
@@ -61,4 +62,8 @@ int dyld_get_program_sdk_version(void);
 - (NSDate*)getNotValidityNotAfterWithError:(NSError**)error;
 - (NSString*)getOrgnizationUnitWithError:(NSError**)error;
 
+@end
+
+@interface UIImage(LiveContainer)
++ (instancetype)iconForBundleURL:(NSURL*)url isDarkIcon:(BOOL)isDarkIcon;
 @end

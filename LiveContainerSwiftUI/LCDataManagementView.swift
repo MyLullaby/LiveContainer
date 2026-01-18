@@ -29,6 +29,7 @@ struct LCDataManagementView : View {
     @State var successInfo = ""
     
     @EnvironmentObject private var sharedModel : SharedModel
+    @AppStorage("LCLaunchInMultitaskMode") var launchInMultitaskMode = false
     
     init(appDataFolderNames: Binding<[String]>) {        
         _appDataFolderNames = appDataFolderNames
@@ -72,6 +73,14 @@ struct LCDataManagementView : View {
                     Task { await removeKeyChain() }
                 } label: {
                     Text("lc.settings.cleanKeychain".loc)
+                }
+            }
+            
+            Section {
+                Button {
+                    Task { await clearIconCache() }
+                } label: {
+                    Text("lc.settings.clearIconCache".loc)
                 }
             }
             
@@ -343,13 +352,12 @@ struct LCDataManagementView : View {
             }
         }
         if let filzaBundleName {
-            UserDefaults.standard.setValue(filzaBundleName, forKey: "selected")
             UserDefaults.standard.setValue(launchURLStr, forKey: "launchAppUrlScheme")
             for app in sharedModel.apps {
                 if app.appInfo.bundleIdentifier() == "com.tigisoftware.Filza" {
                     Task {
                         do {
-                            try await app.runApp()
+                            try await app.runApp(multitask: launchInMultitaskMode)
                         } catch {
                             successInfo = error.localizedDescription
                             successShow = true
@@ -358,6 +366,12 @@ struct LCDataManagementView : View {
                     break
                 }
             }
+        }
+    }
+    
+    func clearIconCache() async {
+        for app in sharedModel.apps {
+            app.appInfo.clearIconCache()
         }
     }
 }
