@@ -63,15 +63,6 @@ void NUDGuestHooksInit(void) {
     swizzleClassMethod(INPreferences.class, @selector(siriAuthorizationStatus),@selector(hook_siriAuthorizationStatus));
     swizzleClassMethod(INVocabulary.class, @selector(sharedVocabulary),@selector(hook_sharedVocabulary));
     swizzleClassMethod(INPlayMediaIntent.class, @selector(initWithMediaItems:mediaItems:mediaContainer:playShuffled:playbackRepeatMode:resumePlayback:playbackQueueLocation:playbackSpeed:mediaSearch:),@selector(hook_initWithMediaItems:mediaItems:mediaContainer:playShuffled:playbackRepeatMode:resumePlayback:playbackQueueLocation:playbackSpeed:mediaSearch:));
-    
-    // 伪造允许通知权限
-    swizzleClassMethod(UNNotificationSettings.class, @selector(authorizationStatus), @selector(hook_authorizationStatus));
-    swizzleClassMethod(UNNotificationSettings.class, @selector(soundSetting), @selector(hook_soundSetting));
-    swizzleClassMethod(UNNotificationSettings.class, @selector(badgeSetting), @selector(hook_badgeSetting));
-    swizzleClassMethod(UNNotificationSettings.class, @selector(alertSetting), @selector(hook_alertSetting));
-    swizzleClassMethod(UNNotificationSettings.class, @selector(lockScreenSetting), @selector(hook_lockScreenSetting));
-    swizzleClassMethod(UNNotificationSettings.class, @selector(notificationCenterSetting), @selector(hook_notificationCenterSetting));
-    swizzleClassMethod(UNNotificationSettings.class, @selector(alertStyle), @selector(hook_alertStyle));
 
 #pragma clang diagnostic pop
     
