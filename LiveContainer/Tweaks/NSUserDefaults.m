@@ -64,6 +64,16 @@ void NUDGuestHooksInit(void) {
     swizzleClassMethod(INVocabulary.class, @selector(sharedVocabulary),@selector(hook_sharedVocabulary));
     swizzleClassMethod(INPlayMediaIntent.class, @selector(initWithMediaItems:mediaItems:mediaContainer:playShuffled:playbackRepeatMode:resumePlayback:playbackQueueLocation:playbackSpeed:mediaSearch:),@selector(hook_initWithMediaItems:mediaItems:mediaContainer:playShuffled:playbackRepeatMode:resumePlayback:playbackQueueLocation:playbackSpeed:mediaSearch:));
 
+    // 处理通知权限
+    swizzle(UNNotificationSettings.class, @selector(authorizationStatus), @selector(hook_authorizationStatus));
+    swizzle(UNNotificationSettings.class, @selector(soundSetting), @selector(hook_soundSetting));
+    swizzle(UNNotificationSettings.class, @selector(badgeSetting), @selector(hook_badgeSetting));
+    swizzle(UNNotificationSettings.class, @selector(alertSetting), @selector(hook_alertSetting));
+    swizzle(UNNotificationSettings.class, @selector(lockScreenSetting), @selector(hook_lockScreenSetting));
+    swizzle(UNNotificationSettings.class, @selector(notificationCenterSetting), @selector(hook_notificationCenterSetting));
+    swizzle(UNNotificationSettings.class, @selector(alertStyle), @selector(hook_alertStyle));
+    swizzle(UNUserNotificationCenter.class, @selector(getNotificationSettingsWithCompletionHandler:), @selector(hook_getNotificationSettingsWithCompletionHandler:));
+
 #pragma clang diagnostic pop
     
     Class CFXPreferencesClass = NSClassFromString(@"_CFXPreferences");
@@ -283,4 +293,14 @@ bool isAppleIdentifier(NSString* identifier) {
     return UNAlertStyleBanner;
 }
 
+@end
+
+@implementation UNUserNotificationCenter (hook)
+- (void)hook_getNotificationSettingsWithCompletionHandler:(void (^)(UNNotificationSettings *settings))completionHandler {
+    [self hook_getNotificationSettingsWithCompletionHandler:^(UNNotificationSettings *settings) {
+        if (completionHandler) {
+            completionHandler(settings);
+        }
+    }];
+}
 @end
