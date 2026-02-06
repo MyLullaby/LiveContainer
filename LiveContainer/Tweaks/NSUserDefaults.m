@@ -72,7 +72,6 @@ void NUDGuestHooksInit(void) {
     swizzle(UNNotificationSettings.class, @selector(lockScreenSetting), @selector(hook_lockScreenSetting));
     swizzle(UNNotificationSettings.class, @selector(notificationCenterSetting), @selector(hook_notificationCenterSetting));
     swizzle(UNNotificationSettings.class, @selector(alertStyle), @selector(hook_alertStyle));
-    swizzle(UNUserNotificationCenter.class, @selector(getNotificationSettingsWithCompletionHandler:), @selector(hook_getNotificationSettingsWithCompletionHandler:));
 
 #pragma clang diagnostic pop
     
@@ -293,14 +292,4 @@ bool isAppleIdentifier(NSString* identifier) {
     return UNAlertStyleBanner;
 }
 
-@end
-
-@implementation UNUserNotificationCenter (hook)
-- (void)hook_getNotificationSettingsWithCompletionHandler:(void (^)(UNNotificationSettings *settings))completionHandler {
-    [self hook_getNotificationSettingsWithCompletionHandler:^(UNNotificationSettings *settings) {
-        if (completionHandler) {
-            completionHandler(settings);
-        }
-    }];
-}
 @end
