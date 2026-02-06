@@ -288,7 +288,7 @@ bool isAppleIdentifier(NSString* identifier) {
     return UNNotificationSettingEnabled;
 }
 
-- (UNNotificationSetting)hook_alertStyle {
+- (UNAlertStyle)hook_alertStyle {
     return UNAlertStyleBanner;
 }
 
