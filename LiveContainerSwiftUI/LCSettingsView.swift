@@ -53,6 +53,7 @@ struct LCSettingsView: View {
     @AppStorage("LCRestartTerminatedApp", store: LCUtils.appGroupUserDefault) var restartTerminatedApp = false
     @AppStorage("LCMaxOneAppOnStage", store: LCUtils.appGroupUserDefault) var onlyOneAppOnStage = false
     @AppStorage("LCDockWidth", store: LCUtils.appGroupUserDefault) var dockWidth: Double = 80
+    @AppStorage("LCRedirectURLToHost", store: LCUtils.appGroupUserDefault) var redirectURLToHost = false
     
     @State var store : Store = .Unknown
     
@@ -67,10 +68,12 @@ struct LCSettingsView: View {
     
     @EnvironmentObject private var sharedModel : SharedModel
     
+    @State private var isViewAppeared = false
+    
     let storeName = LCUtils.getStoreName()
     
     init(appDataFolderNames: Binding<[String]>) {
-        _certificateDataFound = State(initialValue: LCUtils.certificatePassword() != nil)
+        _certificateDataFound = State(initialValue: LCSharedUtils.certificatePassword() != nil)
         _store = State(initialValue: LCUtils.store())
         
         _appDataFolderNames = appDataFolderNames
@@ -165,7 +168,7 @@ struct LCSettingsView: View {
                     Picker(selection: $JITEnabler) {
                         Text("SideJITServer/JITStreamer 2.0").tag(JITEnablerType.SideJITServer)
                         Text("StikDebug").tag(JITEnablerType.StkiJIT)
-                        Text("StikJIT (Another LiveContainer)").tag(JITEnablerType.StikJITLC)
+                        Text("StikDebug (Another LiveContainer)").tag(JITEnablerType.StikJITLC)
                         Text("SideStore").tag(JITEnablerType.SideStore)
                         Text("JitStreamer-EB (Relaunch)").tag(JITEnablerType.JITStreamerEBLegacy)
                     } label: {
@@ -265,6 +268,9 @@ struct LCSettingsView: View {
                             }
                             Toggle(isOn: $bottomWindowBar) {
                                 Text("lc.settings.bottomWindowBar".loc)
+                            }
+                            Toggle(isOn: $redirectURLToHost) {
+                                Text("lc.settings.redirectURLToHost".loc)
                             }
                             VStack(alignment: .leading, spacing: 12) {
                                 HStack {
@@ -372,9 +378,9 @@ struct LCSettingsView: View {
                             Text("Nuke SideStore")
                         }
                         Button {
-                            exportMainExecutable()
+                            exportMainBundle()
                         } label: {
-                            Text("Export Main Executable")
+                            Text("Export Main Bundle")
                         }
                         Button {
                             resetSymbolOffsets()
@@ -469,8 +475,15 @@ struct LCSettingsView: View {
             )
         }
         .navigationViewStyle(StackNavigationViewStyle())
-        .task(id: sharedModel.deepLinkCounter) {
-            guard sharedModel.selectedTab == .settings, let link = sharedModel.deepLink else { return }
+        .onAppear() {
+            if !isViewAppeared {
+                guard sharedModel.selectedTab == .settings, let link = sharedModel.deepLink else { return }
+                handleURL(url: link)
+                isViewAppeared = true
+            }
+        }
+        .onChange(of: sharedModel.deepLink) { link in
+            guard sharedModel.selectedTab == .settings, let link else { return }
             handleURL(url: link)
         }
     }
@@ -518,7 +531,7 @@ struct LCSettingsView: View {
         }
         
         // 3. Read "certPassword" from UserDefaults and save to pass.txt in Documents
-        if let certPassword = LCUtils.certificatePassword() {
+        if let certPassword = LCSharedUtils.certificatePassword() {
             let passwordFileURL = documentsURL.appendingPathComponent("pass.txt")
             do {
                 try certPassword.write(to: passwordFileURL, atomically: true, encoding: .utf8)
@@ -531,16 +544,16 @@ struct LCSettingsView: View {
         }
     }
     
-    func exportMainExecutable() {
-        let url = Bundle.main.executableURL!
+    func exportMainBundle() {
+        let url = Bundle.main.bundleURL
         let fileManager = FileManager.default
         let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
         do {
             let destinationURL = documentsURL.appendingPathComponent(url.lastPathComponent)
             try fileManager.copyItem(at: url, to: destinationURL)
-            print("Successfully copied main executable to Documents.")
+            print("Successfully copied main bundle to Documents.")
         } catch {
-            print("Error copying main executable \(error)")
+            print("Error copying main bundle \(error)")
         }
     }
     
@@ -584,7 +597,7 @@ struct LCSettingsView: View {
         LCUtils.appGroupUserDefault.set(NSDate.now, forKey: "LCCertificateUpdateDate")
         certificateDataFound = true
 
-        UserDefaults.standard.set(LCUtils.appGroupID(), forKey: "LCAppGroupID")
+        UserDefaults.standard.set(LCSharedUtils.appGroupID(), forKey: "LCAppGroupID")
     }
     
     func importCertificateFromSideStore() async {

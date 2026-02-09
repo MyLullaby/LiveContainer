@@ -386,5 +386,7 @@ extern NSBundle *lcMainBundle;
     NSDictionary* infoDict = [NSDictionary dictionaryWithContentsOfFile:bundleInfoPath];
     return infoDict[@"LCDataUUID"];
 }
-
++ (NSArray<NSString*>*)lcUrlSchemes {
+    return @[@"livecontainer", @"livecontainer2", @"livecontainer3"];
+}
 @end

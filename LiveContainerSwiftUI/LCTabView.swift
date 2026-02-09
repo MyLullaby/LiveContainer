@@ -150,7 +150,9 @@ struct LCTabView: View {
         } while(false)
 
         sharedModel.deepLink = url
-        sharedModel.deepLinkCounter += 1
+        DispatchQueue.main.async {
+            sharedModel.deepLink = nil
+        }
     }
     
     func closeDuplicatedWindow() {
@@ -202,7 +204,7 @@ struct LCTabView: View {
             return
         }
         
-        guard let currentTeamId = LCUtils.teamIdentifier() else {
+        guard let currentTeamId = LCSharedUtils.teamIdentifier() else {
             print("Failed to determine team id.")
             return
         }
