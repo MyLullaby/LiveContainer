@@ -37,7 +37,8 @@ struct LCSettingsView: View {
     @AppStorage("LCOpenWebPageWithoutAsking") var silentOpenWebPage = false
     @AppStorage("LCDontSignApp", store: LCUtils.appGroupUserDefault) var dontSignApp = false
     @AppStorage("LCStrictHiding", store: LCUtils.appGroupUserDefault) var strictHiding = false
-    @AppStorage("dynamicColors") var dynamicColors = true
+    @AppStorage("dynamicColors", store: LCUtils.appGroupUserDefault) var dynamicColors = true
+    @AppStorage("darkModeIcon", store: LCUtils.appGroupUserDefault) var darkModeIcon = false
     
     @AppStorage("LCSideJITServerAddress", store: LCUtils.appGroupUserDefault) var sideJITServerAddress : String = ""
     @AppStorage("LCDeviceUDID", store: LCUtils.appGroupUserDefault) var deviceUDID: String = ""
@@ -50,7 +51,9 @@ struct LCSettingsView: View {
     @AppStorage("LCAutoEndPiP", store: LCUtils.appGroupUserDefault) var autoEndPiP = false
     @AppStorage("LCSkipTerminatedScreen", store: LCUtils.appGroupUserDefault) var skipTerminatedScreen = false
     @AppStorage("LCRestartTerminatedApp", store: LCUtils.appGroupUserDefault) var restartTerminatedApp = false
+    @AppStorage("LCMaxOneAppOnStage", store: LCUtils.appGroupUserDefault) var onlyOneAppOnStage = false
     @AppStorage("LCDockWidth", store: LCUtils.appGroupUserDefault) var dockWidth: Double = 80
+    @AppStorage("LCRedirectURLToHost", store: LCUtils.appGroupUserDefault) var redirectURLToHost = false
     
     @State var store : Store = .Unknown
     
@@ -61,13 +64,16 @@ struct LCSettingsView: View {
     #endif
     @AppStorage("LCKeepSelectedWhenQuit") var keepSelectedWhenQuit = false
     @AppStorage("LCWaitForDebugger") var waitForDebugger = false
+    @AppStorage("LCSharePrivateDataWithLiveProcess") var sharePrivateDataWithLiveProcess = false
     
     @EnvironmentObject private var sharedModel : SharedModel
+    
+    @State private var isViewAppeared = false
     
     let storeName = LCUtils.getStoreName()
     
     init(appDataFolderNames: Binding<[String]>) {
-        _certificateDataFound = State(initialValue: LCUtils.certificatePassword() != nil)
+        _certificateDataFound = State(initialValue: LCSharedUtils.certificatePassword() != nil)
         _store = State(initialValue: LCUtils.store())
         
         _appDataFolderNames = appDataFolderNames
@@ -162,7 +168,7 @@ struct LCSettingsView: View {
                     Picker(selection: $JITEnabler) {
                         Text("SideJITServer/JITStreamer 2.0").tag(JITEnablerType.SideJITServer)
                         Text("StikDebug").tag(JITEnablerType.StkiJIT)
-                        Text("StikJIT (Another LiveContainer)").tag(JITEnablerType.StikJITLC)
+                        Text("StikDebug (Another LiveContainer)").tag(JITEnablerType.StikJITLC)
                         Text("SideStore").tag(JITEnablerType.SideStore)
                         Text("JitStreamer-EB (Relaunch)").tag(JITEnablerType.JITStreamerEBLegacy)
                     } label: {
@@ -179,6 +185,12 @@ struct LCSettingsView: View {
                     Toggle(isOn: $dynamicColors) {
                         Text("lc.settings.dynamicColors".loc)
                     }
+                    if #available(iOS 18.0, *) {
+                        Toggle(isOn: $darkModeIcon) {
+                            Text("lc.settings.darkModeIcon".loc)
+                        }
+                    }
+                    
                 } header: {
                     Text("lc.settings.interface".loc)
                 } footer: {
@@ -238,6 +250,11 @@ struct LCSettingsView: View {
                             Toggle(isOn: $launchMultitaskMaximized) {
                                 Text("lc.settings.launchMultitaskMaximized".loc)
                             }
+                            if launchMultitaskMaximized {
+                                Toggle(isOn: $onlyOneAppOnStage) {
+                                    Text("lc.settings.onlyOneAppOnStage".loc)
+                                }
+                            }
                             Toggle(isOn: $autoEndPiP) {
                                 Text("lc.settings.autoEndPiP".loc)
                             }
@@ -251,6 +268,9 @@ struct LCSettingsView: View {
                             }
                             Toggle(isOn: $bottomWindowBar) {
                                 Text("lc.settings.bottomWindowBar".loc)
+                            }
+                            Toggle(isOn: $redirectURLToHost) {
+                                Text("lc.settings.redirectURLToHost".loc)
                             }
                             VStack(alignment: .leading, spacing: 12) {
                                 HStack {
@@ -339,6 +359,9 @@ struct LCSettingsView: View {
                         Toggle(isOn: $waitForDebugger) {
                             Text("Wait For Debugger")
                         }
+                        Toggle(isOn: $sharePrivateDataWithLiveProcess) {
+                            Text("Allow Private Data access from LiveProcess")
+                        }
                         Button {
                             export()
                         } label: {
@@ -355,15 +378,21 @@ struct LCSettingsView: View {
                             Text("Nuke SideStore")
                         }
                         Button {
-                            exportMainExecutable()
+                            exportMainBundle()
                         } label: {
-                            Text("Export Main Executable")
+                            Text("Export Main Bundle")
                         }
                         Button {
                             resetSymbolOffsets()
                         } label: {
                             Text("Reset Symbol Offsets")
                         }
+                        Button {
+                            presentFLEXOverlay()
+                        } label: {
+                            Text("Show FLEX Overlay")
+                        }
+                        .disabled(NSClassFromString("FLEXManager") == nil)
                         #if is32BitSupported
                         HStack {
                             Text("LiveExec32 .app path")
@@ -446,8 +475,16 @@ struct LCSettingsView: View {
             )
         }
         .navigationViewStyle(StackNavigationViewStyle())
-        .onOpenURL { url in
-            handleURL(url: url)
+        .onAppear() {
+            if !isViewAppeared {
+                guard sharedModel.selectedTab == .settings, let link = sharedModel.deepLink else { return }
+                handleURL(url: link)
+                isViewAppeared = true
+            }
+        }
+        .onChange(of: sharedModel.deepLink) { link in
+            guard sharedModel.selectedTab == .settings, let link else { return }
+            handleURL(url: link)
         }
     }
     
@@ -494,7 +531,7 @@ struct LCSettingsView: View {
         }
         
         // 3. Read "certPassword" from UserDefaults and save to pass.txt in Documents
-        if let certPassword = LCUtils.certificatePassword() {
+        if let certPassword = LCSharedUtils.certificatePassword() {
             let passwordFileURL = documentsURL.appendingPathComponent("pass.txt")
             do {
                 try certPassword.write(to: passwordFileURL, atomically: true, encoding: .utf8)
@@ -507,21 +544,27 @@ struct LCSettingsView: View {
         }
     }
     
-    func exportMainExecutable() {
-        let url = Bundle.main.executableURL!
+    func exportMainBundle() {
+        let url = Bundle.main.bundleURL
         let fileManager = FileManager.default
         let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
         do {
             let destinationURL = documentsURL.appendingPathComponent(url.lastPathComponent)
             try fileManager.copyItem(at: url, to: destinationURL)
-            print("Successfully copied main executable to Documents.")
+            print("Successfully copied main bundle to Documents.")
         } catch {
-            print("Error copying main executable \(error)")
+            print("Error copying main bundle \(error)")
         }
     }
     
     func resetSymbolOffsets() {
         LCUtils.appGroupUserDefault.removeObject(forKey: "symbolOffsetCache")
+    }
+    
+    func presentFLEXOverlay() {
+        let manager = (NSClassFromString("FLEXManager") as? NSObject.Type)?.perform(NSSelectorFromString("sharedManager"))
+            .takeUnretainedValue() as? NSObject
+        manager?.perform(NSSelectorFromString("showExplorer"))
     }
     
     func importCertificate() async {
@@ -554,7 +597,7 @@ struct LCSettingsView: View {
         LCUtils.appGroupUserDefault.set(NSDate.now, forKey: "LCCertificateUpdateDate")
         certificateDataFound = true
 
-        UserDefaults.standard.set(LCUtils.appGroupID(), forKey: "LCAppGroupID")
+        UserDefaults.standard.set(LCSharedUtils.appGroupID(), forKey: "LCAppGroupID")
     }
     
     func importCertificateFromSideStore() async {

@@ -8,14 +8,6 @@
 import Foundation
 import SwiftUI
 
-public enum LCTabIdentifier: Hashable {
-    case sources
-    case apps
-    case tweaks
-    case settings
-    case search
-}
-
 struct LCTabView: View {
     @Binding var appDataFolderNames: [String]
     @Binding var tweakFolderNames: [String]
@@ -104,12 +96,13 @@ struct LCTabView: View {
         } message: {
             Text(errorInfo)
         }
-        .onAppear() {
+        .task {
             closeDuplicatedWindow()
             checkLastLaunchError()
             checkTeamId()
             checkBundleId()
             checkGetTaskAllow()
+            checkPrivateContainerBookmark()
         }
         .onReceive(pub) { out in
             if let scene1 = sceneDelegate.window?.windowScene, let scene2 = out.object as? UIWindowScene, scene1 == scene2 {
@@ -122,6 +115,43 @@ struct LCTabView: View {
             if newValue != LCTabIdentifier.search {
                 previousSelectedTab = newValue
             }
+        }
+        .onOpenURL { url in
+            dispatchURL(url: url)
+        }
+    }
+    
+    func dispatchURL(url: URL) {
+        repeat {
+            if url.isFileURL {
+                sharedModel.selectedTab = .apps
+                break
+            }
+            if url.scheme?.lowercased() == "sidestore" {
+                sharedModel.selectedTab = .apps
+                break
+            }
+            
+            guard let host = url.host?.lowercased() else {
+                return
+            }
+            
+            switch host {
+            case "livecontainer-launch", "install", "open-web-page", "open-url":
+                sharedModel.selectedTab = .apps
+            case "certificate":
+                sharedModel.selectedTab = .settings
+            case "source":
+                sharedModel.selectedTab = .sources
+            default:
+                return
+            }
+            
+        } while(false)
+
+        sharedModel.deepLink = url
+        DispatchQueue.main.async {
+            sharedModel.deepLink = nil
         }
     }
     
@@ -174,7 +204,7 @@ struct LCTabView: View {
             return
         }
         
-        guard let currentTeamId = LCUtils.teamIdentifier() else {
+        guard let currentTeamId = LCSharedUtils.teamIdentifier() else {
             print("Failed to determine team id.")
             return
         }
@@ -229,5 +259,21 @@ struct LCTabView: View {
             errorShow = true
             return
         }
+    }
+    
+    func checkPrivateContainerBookmark() {
+        if sharedModel.multiLCStatus == 2 {
+            return
+        }
+        if LCUtils.appGroupUserDefault.object(forKey: "LCLaunchExtensionPrivateDocBookmark") != nil {
+            return
+        }
+        
+        guard let bookmark = LCUtils.bookmark(for: LCPath.docPath) else {
+            errorInfo = "Failed to create bookmark for Documents folder?"
+            errorShow = true
+            return
+        }
+        LCUtils.appGroupUserDefault.set(bookmark, forKey: "LCLaunchExtensionPrivateDocBookmark")
     }
 }

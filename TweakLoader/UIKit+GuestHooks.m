@@ -7,11 +7,11 @@
 
 UIInterfaceOrientation LCOrientationLock = UIInterfaceOrientationUnknown;
 NSMutableArray<NSString*>* LCSupportedUrlSchemes = nil;
-NSArray<NSString*>* LCUrlSchemes = nil;
 NSUUID* idForVendorUUID = nil;
 
 __attribute__((constructor))
 static void UIKitGuestHooksInit() {
+    if(!NSUserDefaults.lcGuestAppId) return;
     swizzle(UIApplication.class, @selector(_applicationOpenURLAction:payload:origin:), @selector(hook__applicationOpenURLAction:payload:origin:));
     swizzle(UIApplication.class, @selector(_connectUISceneFromFBSScene:transitionContext:), @selector(hook__connectUISceneFromFBSScene:transitionContext:));
     swizzle(UIApplication.class, @selector(openURL:options:completionHandler:), @selector(hook_openURL:options:completionHandler:));
@@ -50,8 +50,6 @@ static void UIKitGuestHooksInit() {
             }
         }
     }
-    
-    LCUrlSchemes = @[@"livecontainer", @"livecontainer2", @"livecontainer3"];
 }
 
 NSString* findDefaultContainerWithBundleId(NSString* bundleId) {
@@ -72,7 +70,7 @@ NSString* findDefaultContainerWithBundleId(NSString* bundleId) {
 }
 
 void forEachInstalledNotCurrentLC(BOOL isFree, void (^block)(NSString* scheme, BOOL* isBreak)) {
-    for(NSString* scheme in LCUrlSchemes) {
+    for(NSString* scheme in [NSClassFromString(@"LCSharedUtils") lcUrlSchemes]) {
         if([scheme isEqualToString:NSUserDefaults.lcAppUrlScheme]) {
             continue;
         }
@@ -357,6 +355,12 @@ void handleLiveContainerLaunch(NSURL* url) {
     }
 }
 
+BOOL shouldRedirectOpenURLToHost(NSURL* url) {
+    NSUserDefaults *ud = NSUserDefaults.lcSharedDefaults;
+    return NSUserDefaults.isLiveProcess &&
+    [ud boolForKey:@"LCRedirectURLToHost"] &&
+    [[ud arrayForKey:@"LCGuestURLSchemes"] containsObject:url.scheme];
+}
 BOOL canAppOpenItself(NSURL* url) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
@@ -427,8 +431,55 @@ BOOL canAppOpenItself(NSURL* url) {
 
 - (void)hook__connectUISceneFromFBSScene:(id)scene transitionContext:(UIApplicationSceneTransitionContext*)context {
 #if !TARGET_OS_MACCATALYST
-    context.payload = nil;
-    context.actions = nil;
+    NSString* urlStr;
+    if(context.payload && (urlStr = context.payload[UIApplicationLaunchOptionsURLKey])) {
+        BOOL urlDecodeSuccess = NO;
+        do {
+            if([urlStr hasPrefix:[NSString stringWithFormat: @"%@://open-url", NSUserDefaults.lcAppUrlScheme]]) {
+                NSURLComponents* lcUrl = [NSURLComponents componentsWithString:urlStr];
+                NSString* realUrlEncoded = lcUrl.queryItems[0].value;
+                if(!realUrlEncoded) break;
+                // Convert the base64 encoded url into String
+                NSData *decodedData = [[NSData alloc] initWithBase64EncodedString:realUrlEncoded options:0];
+                NSString *decodedUrlStr = [[NSString alloc] initWithData:decodedData encoding:NSUTF8StringEncoding];
+                NSURL* decodedUrl = [NSURL URLWithString:decodedUrlStr];
+                if(!canAppOpenItself(decodedUrl)) {
+                    break;
+                }
+                urlDecodeSuccess = YES;
+                
+                NSMutableDictionary* newDict = [context.payload mutableCopy];
+                newDict[UIApplicationLaunchOptionsURLKey] = decodedUrl;
+                context.payload = newDict;
+                
+                if(context.actions) {
+                    UIOpenURLAction *urlAction = nil;
+                    for (id obj in context.actions.allObjects) {
+                        if ([obj isKindOfClass:UIOpenURLAction.class]) {
+                            urlAction = obj;
+                            break;
+                        }
+                    }
+                    if(!urlAction) {
+                        break;
+                    }
+                    NSMutableSet *newActions = context.actions.mutableCopy;
+                    [newActions removeObject:urlAction];
+
+                    UIOpenURLAction *newUrlAction = [[UIOpenURLAction alloc] initWithURL:decodedUrl];
+                    [newActions addObject:newUrlAction];
+                    context.actions = newActions;
+                }
+
+            }
+        } while(0);
+
+        if(!urlDecodeSuccess) {
+            context.payload = nil;
+            context.actions = nil;
+        }
+    }
+    
 #endif
     [self hook__connectUISceneFromFBSScene:scene transitionContext:context];
 }
@@ -455,10 +506,13 @@ BOOL canAppOpenItself(NSURL* url) {
         return;
     }
     
-    if(canAppOpenItself(url)) {
+    BOOL openSelf = canAppOpenItself(url);
+    BOOL redirectToHost = shouldRedirectOpenURLToHost(url);;
+    if(openSelf || redirectToHost) {
+        NSString* schemeToUse = openSelf ? NSUserDefaults.lcAppUrlScheme : @"livecontainer";
         NSData *data = [url.absoluteString dataUsingEncoding:NSUTF8StringEncoding];
         NSString *encodedUrl = [data base64EncodedStringWithOptions:0];
-        NSString* finalUrlStr = [NSString stringWithFormat:@"%@://open-url?url=%@", NSUserDefaults.lcAppUrlScheme, encodedUrl];
+        NSString* finalUrlStr = [NSString stringWithFormat:@"%@://open-url?url=%@", schemeToUse, encodedUrl];
         NSURL* finalUrl = [NSURL URLWithString:finalUrlStr];
         [self hook_openURL:finalUrl options:options completionHandler:completion];
     } else {
@@ -466,11 +520,7 @@ BOOL canAppOpenItself(NSURL* url) {
     }
 }
 - (BOOL)hook_canOpenURL:(NSURL *) url {
-    if(canAppOpenItself(url)) {
-        return YES;
-    } else {
-        return [self hook_canOpenURL:url];
-    }
+    return canAppOpenItself(url) || shouldRedirectOpenURLToHost(url) || [self hook_canOpenURL:url];
 }
 
 - (void)hook_setDelegate:(id<UIApplicationDelegate>)delegate {
@@ -565,17 +615,23 @@ BOOL canAppOpenItself(NSURL* url) {
         LCShowAlert(@"lc.guestTweak.restartToInstall".loc);
         return;
     }
-
-    NSMutableSet *newActions = actions.mutableCopy;
-    [newActions removeObject:urlAction];
-    [self hook_scene:scene didReceiveActions:newActions fromTransitionContext:context];
+    
+    if ([urlAction.url.scheme isEqualToString:NSUserDefaults.lcAppUrlScheme]) {
+        NSMutableSet *newActions = actions.mutableCopy;
+        [newActions removeObject:urlAction];
+        actions = newActions;
+    }
+    [self hook_scene:scene didReceiveActions:actions fromTransitionContext:context];
 }
 
 - (void)hook_openURL:(NSURL *)url options:(UISceneOpenExternalURLOptions *)options completionHandler:(void (^)(BOOL success))completion {
-    if(canAppOpenItself(url)) {
+    BOOL openSelf = canAppOpenItself(url);
+    BOOL redirectToHost = shouldRedirectOpenURLToHost(url);
+    if(openSelf || redirectToHost) {
+        NSString* schemeToUse = openSelf ? NSUserDefaults.lcAppUrlScheme : @"livecontainer";
         NSData *data = [url.absoluteString dataUsingEncoding:NSUTF8StringEncoding];
         NSString *encodedUrl = [data base64EncodedStringWithOptions:0];
-        NSString* finalUrlStr = [NSString stringWithFormat:@"%@://open-url?url=%@", NSUserDefaults.lcAppUrlScheme, encodedUrl];
+        NSString* finalUrlStr = [NSString stringWithFormat:@"%@://open-url?url=%@", schemeToUse, encodedUrl];
         NSURL* finalUrl = [NSURL URLWithString:finalUrlStr];
         [self hook_openURL:finalUrl options:options completionHandler:completion];
     } else {

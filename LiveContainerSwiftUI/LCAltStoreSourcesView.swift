@@ -488,6 +488,9 @@ struct LCSourcesView: View {
     @State private var expandedSources: Set<URL> = []
     @State private var isManagingSources = false
     
+    @EnvironmentObject private var sharedModel : SharedModel
+    
+    @State private var isViewAppeared = false
     
     var body: some View {
         NavigationView {
@@ -613,13 +616,19 @@ struct LCSourcesView: View {
         }
         .onAppear {
             expandedSources = []
+            if !isViewAppeared {
+                guard sharedModel.selectedTab == .sources, let link = sharedModel.deepLink else { return }
+                handleURL(url: link)
+                isViewAppeared = true
+            }
         }
         .onChange(of: viewModel.sources) { newSources in
             let newSet = Set(newSources.map { $0.id })
             expandedSources = expandedSources.intersection(newSet)
         }
-        .onOpenURL { url in
-            handleURL(url: url)
+        .onChange(of: sharedModel.deepLink) { link in
+            guard sharedModel.selectedTab == .sources, let link else { return }
+            handleURL(url: link)
         }
     }
     
@@ -675,15 +684,14 @@ struct LCSourcesView: View {
             errorMessage = "lc.sources.error.missingDownload".loc
             return
         }
-        guard let encoded = downloadURL.absoluteString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let installURL = URL(string: "livecontainer://install?url=\(encoded)") else {
-            errorMessage = "lc.sources.error.invalidUrl".loc
-            return
-        }
-        UIApplication.shared.open(installURL)
         withAnimation {
             DataManager.shared.model.selectedTab = .apps
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            NotificationCenter.default.post(name: NSNotification.InstallAppNotification, object: ["url": downloadURL])
+        }
+
+
     }
     
     private func toggleExpansion(for id: URL) {
@@ -944,6 +952,7 @@ private struct LCSourceAppBanner: View {
     let installAction: (AltStoreSourceApp) -> Void
     
     @AppStorage("dynamicColors") private var dynamicColors = true
+    @Environment(\.colorScheme) var colorScheme
     
     private var primaryColor: Color {
         guard dynamicColors else { return Color("FontColor") }
@@ -951,7 +960,9 @@ private struct LCSourceAppBanner: View {
     }
     
     private var textColor: Color {
-        dynamicColors ? primaryColor : Color("FontColor")
+        _ = colorScheme == .dark // trigger refresh
+        let color = dynamicColors ? primaryColor : Color("FontColor")
+        return color.readableTextColor()
     }
     
     private var backgroundColor: Color {

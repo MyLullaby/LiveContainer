@@ -5,11 +5,13 @@
 #import <UIKit/UIKit.h>
 #import "LCAppInfo.h"
 #import "LCUtils.h"
+#import "../LiveContainer/LCSharedUtils.h"
 
 uint32_t dyld_get_sdk_version(const struct mach_header* mh);
 
 @interface LCAppInfo()
 @property UIImage* cachedIcon;
+@property UIImage* cachedIconDark;
 @end
 
 @implementation LCAppInfo
@@ -78,7 +80,7 @@ uint32_t dyld_get_sdk_version(const struct mach_header* mh);
     _bundlePath = newBundlePath;
 }
 
-- (NSMutableArray*)urlSchemes {
+- (NSMutableArray<NSString *>*)urlSchemes {
     // find all url schemes
     NSMutableArray* urlSchemes = [[NSMutableArray alloc] init];
     int nowSchemeCount = 0;
@@ -179,64 +181,59 @@ uint32_t dyld_get_sdk_version(const struct mach_header* mh);
     return _info;
 }
 
-- (UIImage*)icon {
-    if(_cachedIcon) {
+- (UIImage*)iconIsDarkIcon:(BOOL)isDarkIcon {
+    // if icon is already loaded in memory, return it
+    if(_cachedIcon && !isDarkIcon) {
         return _cachedIcon;
+    } else if (_cachedIconDark && isDarkIcon) {
+        return _cachedIconDark;
     }
     
-    NSBundle* bundle = [[NSBundle alloc] initWithPath: _bundlePath];
-    NSString* iconPath = nil;
-    UIImage* icon = nil;
-
-    @try {
-        if((iconPath = [_infoPlist valueForKeyPath:@"CFBundleIcons.CFBundlePrimaryIcon.CFBundleIconFiles"][0]) &&
-           (icon = [UIImage imageNamed:iconPath inBundle:bundle compatibleWithTraitCollection:nil])) {
-            return icon;
-        }
+    // check if icon is cached on disk
+    UIImage* uiIcon;
+    NSString* cachedIconPath;
+    if(isDarkIcon) {
+        cachedIconPath = [_bundlePath stringByAppendingPathComponent:@"LCAppIconDark.png"];
+    } else {
+        cachedIconPath = [_bundlePath stringByAppendingPathComponent:@"LCAppIconLight.png"];
     }
-    @catch (NSException *exception) {
-        NSLog(@"Failed to get icon from info.plist: %@", exception.reason);
-    }
-    @try {
-        if((iconPath = [_infoPlist valueForKeyPath:@"CFBundleIconFiles"][0]) &&
-           (icon = [UIImage imageNamed:iconPath inBundle:bundle compatibleWithTraitCollection:nil])) {
-            return icon;
-        }
-    }
-    @catch (NSException *exception) {
-        NSLog(@"Failed to get icon from info.plist: %@", exception.reason);
-    }
-    @try {
-        if((iconPath = [_infoPlist valueForKeyPath:@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconName"]) &&
-           (icon = [UIImage imageNamed:iconPath inBundle:bundle compatibleWithTraitCollection:nil])) {
-            return icon;
-        }
-    }
-    @catch (NSException *exception) {
-        NSLog(@"Failed to get icon from info.plist: %@", exception.reason);
+    NSURL* cachedIconUrl = [NSURL fileURLWithPath:cachedIconPath];
+    
+    if([NSFileManager.defaultManager fileExistsAtPath:cachedIconPath]) {
+        CGImageRef imageRef = loadCGImageFromURL(cachedIconUrl);
+        uiIcon = [UIImage imageWithCGImage:imageRef];
     }
     
-    @try {
-        if((iconPath = [_infoPlist valueForKeyPath:@"CFBundleIcons"][@"CFBundlePrimaryIcon"]) && [iconPath isKindOfClass:NSString.class] &&
-           (icon = [UIImage imageNamed:iconPath inBundle:bundle compatibleWithTraitCollection:nil])) {
-            return icon;
-        }
+    // generate and save icon cache to disk
+    if(!uiIcon) {
+        uiIcon = [UIImage generateIconForBundleURL:[NSURL fileURLWithPath:_bundlePath] style:isDarkIcon hasBorder:YES];
+        saveCGImage([uiIcon CGImage], cachedIconUrl);
     }
-    @catch (NSException *exception) {
-        NSLog(@"Failed to get icon from info.plist: %@", exception.reason);
+    
+    // cache icon to memory
+    if(isDarkIcon) {
+        _cachedIconDark = uiIcon;
+    } else {
+        _cachedIcon = uiIcon;
     }
 
-    if(!icon) {
-        icon = [UIImage imageNamed:@"DefaultIcon"];
-    }
-        
-    _cachedIcon = icon;
-    return icon;
+    return uiIcon;
 
 }
 
-- (UIImage *)generateLiveContainerWrappedIcon {
-    UIImage *icon = self.icon;
+- (void)clearIconCache {
+    NSString* lightModeIconPath = [_bundlePath stringByAppendingPathComponent:@"LCAppIconLight.png"];
+    NSString* darkModeIconPath = [_bundlePath stringByAppendingPathComponent:@"LCAppIconDark.png"];
+    [NSFileManager.defaultManager removeItemAtPath:lightModeIconPath error:nil];
+    [NSFileManager.defaultManager removeItemAtPath:darkModeIconPath error:nil];
+    [self setCachedColor:nil];
+    [self setCachedColorDark:nil];
+    _cachedIcon = nil;
+    _cachedIconDark = nil;
+}
+
+- (UIImage *)generateLiveContainerWrappedIconWithStyle:(GeneratedIconStyle)style {
+    UIImage* icon = [UIImage generateIconForBundleURL:[NSURL fileURLWithPath:_bundlePath] style:style hasBorder:NO];
     if (![NSUserDefaults.standardUserDefaults boolForKey:@"LCFrameShortcutIcons"]) {
         return icon;
     }
@@ -253,7 +250,7 @@ uint32_t dyld_get_sdk_version(const struct mach_header* mh);
     return newIcon;
 }
 
-- (NSDictionary *)generateWebClipConfigWithContainerId:(NSString*)containerId {
+- (NSDictionary *)generateWebClipConfigWithContainerId:(NSString*)containerId iconStyle:(GeneratedIconStyle)style{
     NSString* appClipUrl;
     if(containerId) {
         appClipUrl = [NSString stringWithFormat:@"livecontainer://livecontainer-launch?bundle-name=%@&container-folder-name=%@", self.bundlePath.lastPathComponent, containerId];
@@ -261,9 +258,11 @@ uint32_t dyld_get_sdk_version(const struct mach_header* mh);
         appClipUrl = [NSString stringWithFormat:@"livecontainer://livecontainer-launch?bundle-name=%@", self.bundlePath.lastPathComponent];
     }
     
+    UIImage* icon = [self generateLiveContainerWrappedIconWithStyle:style];
+    
     NSDictionary *payload = @{
         @"FullScreen": @YES,
-        @"Icon": UIImagePNGRepresentation(self.generateLiveContainerWrappedIcon),
+        @"Icon": UIImagePNGRepresentation(icon),
         @"IgnoreManifestScope": @YES,
         @"IsRemovable": @YES,
         @"Label": self.displayName,
@@ -329,6 +328,7 @@ uint32_t dyld_get_sdk_version(const struct mach_header* mh);
     bool is32bit = false;
     if (needPatch) {
         __block bool has64bitSlice = NO;
+        __block bool isEncrypted = false;
         NSString *error = LCParseMachO(execPath.UTF8String, false, ^(const char *path, struct mach_header_64 *header, int fd, void* filePtr) {
             if(header->cputype == CPU_TYPE_ARM64) {
                 has64bitSlice |= YES;
@@ -338,10 +338,13 @@ uint32_t dyld_get_sdk_version(const struct mach_header* mh);
                     info[@"dontInjectTweakLoader"] = @YES;
                 }
             }
+            isEncrypted |= LCIsMachOEncrypted(header);
         });
         is32bit = !has64bitSlice;
         LCPatchAppBundleFixupARM64eSlice([NSURL fileURLWithPath:appPath]);
-        
+        if (isEncrypted) {
+            error = @"The app you tried to install is encrypted. Please provide decrypted app.";
+        }
         if (error) {
             [NSUserDefaults.standardUserDefaults removeObjectForKey:@"SigningInProgress"];
             completetionHandler(NO, error);
@@ -361,7 +364,7 @@ uint32_t dyld_get_sdk_version(const struct mach_header* mh);
     self.is32Bit = is32bit;
 #endif
 
-    if (!LCUtils.certificatePassword || is32bit || self.dontSign) {
+    if (!LCSharedUtils.certificatePassword || is32bit || self.dontSign) {
         [NSUserDefaults.standardUserDefaults removeObjectForKey:@"SigningInProgress"];
         completetionHandler(YES, nil);
         return;
@@ -627,6 +630,37 @@ uint32_t dyld_get_sdk_version(const struct mach_header* mh);
     [self save];
 }
 
+- (UIColor*)cachedColorDark {
+    if(_info[@"cachedColorDark"] != nil) {
+        NSData *colorData = _info[@"cachedColorDark"];
+        NSError* error;
+        UIColor *color = [NSKeyedUnarchiver unarchivedObjectOfClass:UIColor.class fromData:colorData error:&error];
+        if (!error) {
+            return color;
+        } else {
+            NSLog(@"[LC] failed to get color %@", error);
+            return nil;
+        }
+    } else {
+        return nil;
+    }
+}
+
+- (void)setCachedColorDark:(UIColor*)color {
+    if(color == nil) {
+        _info[@"cachedColorDark"] = nil;
+    } else {
+        NSError* error;
+        NSData *colorData = [NSKeyedArchiver archivedDataWithRootObject:color requiringSecureCoding:YES error:&error];
+        [_info setObject:colorData forKey:@"cachedColorDark"];
+        if(error) {
+            NSLog(@"[LC] failed to set color %@", error);
+        }
+
+    }
+    [self save];
+}
+
 - (NSArray<NSDictionary*>* )containerInfo {
     return _info[@"LCContainers"];
 }
@@ -713,6 +747,19 @@ uint32_t dyld_get_sdk_version(const struct mach_header* mh);
 
 - (void)setInstallationDate:(NSDate*)installationDate {
     _info[@"installationDate"] = installationDate;
+    [self save];
+}
+
+- (NSString*)remark {
+    return _info[@"remark"];
+}
+
+- (void)setRemark:(NSString *)remark {
+    if([remark isEqualToString: @""]) {
+        _info[@"remark"] = nil;
+    } else {
+        _info[@"remark"] = remark;
+    }
     [self save];
 }
 

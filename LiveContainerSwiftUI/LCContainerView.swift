@@ -46,93 +46,116 @@ struct LCContainerView : View {
     
     var body: some View {
         Form {
-            Section {
-                HStack {
-                    Text("lc.container.containerName".loc)
-                    Spacer()
-                    TextField("lc.container.containerName".loc, text: $typingContainerName)
-                        .multilineTextAlignment(.trailing)
-                        .onSubmit {
-                            container.name = typingContainerName
-                            saveContainer()
+            if !(container.storageBookMark != nil && container.resolvedContainerURL == nil) {
+                
+                Section {
+                    HStack {
+                        Text("lc.container.containerName".loc)
+                        Spacer()
+                        TextField("lc.container.containerName".loc, text: $typingContainerName)
+                            .multilineTextAlignment(.trailing)
+                            .onSubmit {
+                                container.name = typingContainerName
+                                saveContainer()
+                            }
+                    }
+                    HStack {
+                        Text("lc.container.containerFolderName".loc)
+                        Spacer()
+                        Text(container.folderName)
+                            .foregroundStyle(.gray)
+                    }
+                    Toggle(isOn: $container.isolateAppGroup) {
+                        Text("lc.container.isolateAppGroup".loc)
+                    }
+                    .onChange(of: container.isolateAppGroup) { newValue in
+                        saveContainer()
+                    }
+                    Toggle(isOn: $container.spoofIdentifierForVendor) {
+                        Text("lc.container.spoofIdentifierForVendor".loc)
+                    }
+                    .onChange(of: container.spoofIdentifierForVendor) { newValue in
+                        saveContainer()
+                    }
+                    
+                    if let settingsBundle {
+                        NavigationLink {
+                            AppPreferenceView(bundleId: delegate.getBundleId(), settingsBundle: settingsBundle, containerURL: delegate.getContainerURL(container: container))
+                        } label: {
+                            Text("lc.container.preferences".loc)
                         }
-                }
-                HStack {
-                    Text("lc.container.containerFolderName".loc)
-                    Spacer()
-                    Text(container.folderName)
-                        .foregroundStyle(.gray)
-                }
-                Toggle(isOn: $container.isolateAppGroup) {
-                    Text("lc.container.isolateAppGroup".loc)
-                }
-                .onChange(of: container.isolateAppGroup) { newValue in
-                    saveContainer()
-                }
-                Toggle(isOn: $container.spoofIdentifierForVendor) {
-                    Text("lc.container.spoofIdentifierForVendor".loc)
-                }
-                .onChange(of: container.spoofIdentifierForVendor) { newValue in
-                    saveContainer()
+                    }
+                    if container.folderName == uiDefaultDataFolder {
+                        Text("lc.container.alreadyDefaultContainer".loc)
+                            .foregroundStyle(.gray)
+                    } else {
+                        Button {
+                            setAsDefault()
+                        } label: {
+                            Text("lc.container.setDefaultContainer".loc)
+                        }
+                    }
+                } footer: {
+                    Text("lc.container.defaultContainerDesc".loc)
                 }
                 
-                if let settingsBundle {
-                    NavigationLink {
-                        AppPreferenceView(bundleId: delegate.getBundleId(), settingsBundle: settingsBundle, containerURL: delegate.getContainerURL(container: container))
-                    } label: {
-                        Text("lc.container.preferences".loc)
+                Section {
+                    if inUse {
+                        Text("lc.container.inUse".loc)
+                            .foregroundStyle(.gray)
+                        
+                    } else {
+                        if !container.isShared || container.storageBookMark != nil {
+                            Button {
+                                openDataFolder()
+                            } label: {
+                                Text("lc.appBanner.openDataFolder".loc)
+                            }
+                            Button {
+                                unbindContainer()
+                            } label: {
+                                Text("lc.container.unbind".loc)
+                            }
+                        }
+                        Button(role:.destructive) {
+                            Task { await deleteData() }
+                        } label: {
+                            Text("lc.container.deleteData".loc)
+                        }
+                        
+                        Button(role:.destructive) {
+                            Task { await cleanUpKeychain() }
+                        } label: {
+                            Text("lc.settings.cleanKeychain".loc)
+                        }
+                        
+                        if(container.storageBookMark == nil) {
+                            Button(role:.destructive) {
+                                Task { await removeContainer() }
+                            } label: {
+                                Text("lc.container.removeContainer".loc)
+                            }
+                        }
+
+                        
                     }
                 }
-                if container.folderName == uiDefaultDataFolder {
-                    Text("lc.container.alreadyDefaultContainer".loc)
-                        .foregroundStyle(.gray)
-                } else {
-                    Button {
-                        setAsDefault()
-                    } label: {
-                        Text("lc.container.setDefaultContainer".loc)
+            } else {
+                Section {
+                    if container.bookmarkResolved {
+                        Text("lc.container.externalStorageUnavailable".loc)
+                    } else {
+                        Text("lc.container.bookmarkResolveInProgress".loc)
                     }
+
                 }
-            } footer: {
-                Text("lc.container.defaultContainerDesc".loc)
-            }
-            
-            Section {
-                if inUse {
-                    Text("lc.container.inUse".loc)
-                        .foregroundStyle(.gray)
-                    
-                } else {
-                    if !container.isShared {
-                        Button {
-                            openDataFolder()
-                        } label: {
-                            Text("lc.appBanner.openDataFolder".loc)
-                        }
-                        Button {
-                            unbindContainer()
-                        } label: {
-                            Text("lc.container.unbind".loc)
-                        }
-                    }
-                    Button(role:.destructive) {
-                        Task { await deleteData() }
-                    } label: {
-                        Text("lc.container.deleteData".loc)
-                    }
-                    
-                    Button(role:.destructive) {
-                        Task { await cleanUpKeychain() }
-                    } label: {
-                        Text("lc.settings.cleanKeychain".loc)
-                    }
-                    
+                
+                Section {
                     Button(role:.destructive) {
                         Task { await removeContainer() }
                     } label: {
                         Text("lc.container.removeContainer".loc)
                     }
-                    
                 }
             }
         }
@@ -188,7 +211,7 @@ struct LCContainerView : View {
         .onAppear() {
             container.reloadInfoPlist()
             settingsBundle = delegate.getSettingsBundle()
-            runningLC = LCUtils.getContainerUsingLCScheme(withFolderName: container.folderName)
+            runningLC = LCSharedUtils.getContainerUsingLCScheme(withFolderName: container.folderName)
             inUse = runningLC != nil
         }
         
@@ -196,7 +219,7 @@ struct LCContainerView : View {
     
     
     func saveContainer() {
-        if let usingLC = LCUtils.getContainerUsingLCScheme(withFolderName: container.folderName) {
+        if let usingLC = LCSharedUtils.getContainerUsingLCScheme(withFolderName: container.folderName) {
             errorInfo = "lc.container.inUseBy %@".localizeWithFormat(usingLC)
             errorShow = true
             return
@@ -206,7 +229,7 @@ struct LCContainerView : View {
     }
     
     func openDataFolder() {
-        let url = URL(string:"shareddocuments://\(LCPath.docPath.path)/Data/Application/\(container.folderName)")
+        let url = URL(string:"shareddocuments://\(LCPath.dataPath.path)/\(container.folderName)")
         UIApplication.shared.open(url!)
     }
     
@@ -215,7 +238,7 @@ struct LCContainerView : View {
     }
     
     func removeContainer() async {
-        if let usingLC = LCUtils.getContainerUsingLCScheme(withFolderName: container.folderName) {
+        if let usingLC = LCSharedUtils.getContainerUsingLCScheme(withFolderName: container.folderName) {
             errorInfo = "lc.container.inUseBy %@".localizeWithFormat(usingLC)
             errorShow = true
             return
@@ -237,7 +260,7 @@ struct LCContainerView : View {
     }
     
     func unbindContainer() {
-        if let usingLC = LCUtils.getContainerUsingLCScheme(withFolderName: container.folderName) {
+        if let usingLC = LCSharedUtils.getContainerUsingLCScheme(withFolderName: container.folderName) {
             errorInfo = "lc.container.inUseBy %@".localizeWithFormat(usingLC)
             errorShow = true
             return
@@ -248,7 +271,7 @@ struct LCContainerView : View {
     }
     
     func cleanUpKeychain() async {
-        if let usingLC = LCUtils.getContainerUsingLCScheme(withFolderName: container.folderName) {
+        if let usingLC = LCSharedUtils.getContainerUsingLCScheme(withFolderName: container.folderName) {
             errorInfo = "lc.container.inUseBy %@".localizeWithFormat(usingLC)
             errorShow = true
             return
@@ -261,7 +284,7 @@ struct LCContainerView : View {
     }
     
     func deleteData() async {
-        if let usingLC = LCUtils.getContainerUsingLCScheme(withFolderName: container.folderName) {
+        if let usingLC = LCSharedUtils.getContainerUsingLCScheme(withFolderName: container.folderName) {
             errorInfo = "lc.container.inUseBy %@".localizeWithFormat(usingLC)
             errorShow = true
             return

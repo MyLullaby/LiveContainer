@@ -66,6 +66,8 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     
     @StateObject private var runWhenMultitaskAlert = YesNoHelper()
     
+    @StateObject private var generatedIconStyleSelector = AlertHelper<GeneratedIconStyle>()
+    
     @State var safariViewOpened = false
     @State var safariViewURL = URL(string: "https://google.com")!
     
@@ -81,6 +83,8 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     
     @AppStorage("LCMultitaskMode", store: LCUtils.appGroupUserDefault) var multitaskMode: MultitaskMode = .virtualWindow
     @AppStorage("LCLaunchInMultitaskMode") var launchInMultitaskMode = false
+    
+    @State private var isViewAppeared = false
     
     @ObservedObject var searchContext = SearchContext()
     var sortedApps: [LCAppModel] {
@@ -339,6 +343,26 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         } message: {
             Text("lc.appBanner.confirmRunWhenMultitasking".loc)
         }
+        .alert("lc.appList.generatedIconStyleSelector.title".loc, isPresented:$generatedIconStyleSelector.show) {
+            Button {
+                generatedIconStyleSelector.close(result: .Light)
+            } label: {
+                Text("lc.appList.generatedIconStyleSelector.light".loc)
+            }
+            Button {
+                generatedIconStyleSelector.close(result: .Dark)
+            } label: {
+                Text("lc.appList.generatedIconStyleSelector.dark".loc)
+            }
+            Button {
+                generatedIconStyleSelector.close(result: .Original)
+            } label: {
+                Text("lc.appList.generatedIconStyleSelector.original".loc)
+            }
+            Button("lc.common.cancel".loc, role: .cancel) {
+                generatedIconStyleSelector.close(result: nil)
+            }
+        }
         .textFieldAlert(
             isPresented: $webViewUrlInput.show,
             title:  "lc.appList.enterUrlTip".loc,
@@ -373,7 +397,9 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             sharedModel.isJITModalOpen = newValue
         }
         .fullScreenCover(isPresented: $webViewOpened) {
-            LCWebView(url: $webViewURL, isPresent: $webViewOpened)
+            LCWebView(url: $webViewURL, isPresent: $webViewOpened, itmsServicesHandler: { urlStr in
+                await installFromPlist(urlStr: urlStr)
+            })
         }
         .fullScreenCover(isPresented: $safariViewOpened) {
             SafariView(url: $safariViewURL)
@@ -384,8 +410,21 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         .sheet(isPresented: $customSortViewPresent) {
             LCCustomSortView()
         }
-        .onOpenURL { url in
-            handleURL(url: url)
+        .onAppear() {
+            if !isViewAppeared {
+                guard sharedModel.selectedTab == .apps, let link = sharedModel.deepLink else { return }
+                handleURL(url: link)
+                isViewAppeared = true
+            }
+        }
+        .onChange(of: sharedModel.deepLink) { link in
+            guard sharedModel.selectedTab == .apps, let link else { return }
+            handleURL(url: link)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.InstallAppNotification)) { obj in
+            if let obj2 = obj.object as? [String: Any], let installUrl = obj2["url"] as? URL {
+                Task { await installFromUrl(urlStr: installUrl.absoluteString) }
+            }
         }
         .apply {
             if #available(iOS 19.0, *), SharedModel.isLiquidGlassSearchEnabled {
@@ -466,6 +505,12 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         if urlToOpen.scheme == nil || urlToOpen.scheme! == "" {
             urlToOpen.scheme = "https"
         }
+        
+        if urlToOpen.scheme?.lowercased() == "itms-services" {
+            await installFromPlist(urlStr: urlString)
+            return
+        }
+        
         if urlToOpen.scheme != "https" && urlToOpen.scheme != "http" {
             var appToLaunch : LCAppModel? = nil
             var appListsToConsider = [sharedModel.apps]
@@ -505,9 +550,13 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                 }
             }
             
-            UserDefaults.standard.setValue(appToLaunch.appInfo.relativeBundlePath!, forKey: "selected")
             UserDefaults.standard.setValue(urlToOpen.url!.absoluteString, forKey: "launchAppUrlScheme")
-            LCUtils.launchToGuestApp()
+            do {
+                try await appToLaunch.runApp(multitask: launchInMultitaskMode)
+            } catch {
+                errorInfo = error.localizedDescription
+                errorShow = true
+            }
             
             return
         }
@@ -536,7 +585,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         }
     }
     
-    nonisolated func decompress(_ path: String, _ destination: String ,_ progress: Progress) async {
+    nonisolated func decompress(_ path: String, _ destination: String ,_ progress: Progress) async -> Int32 {
         extract(path, destination, progress)
     }
     
@@ -558,7 +607,9 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         }
         
         // decompress
-        await decompress(url.path, fm.temporaryDirectory.path, decompressProgress)
+        guard await decompress(url.path, fm.temporaryDirectory.path, decompressProgress) == 0 else {
+            throw "lc.appList.urlFileIsNotIpaError".loc
+        }
 
         let payloadContents = try fm.contentsOfDirectory(atPath: payloadPath.path)
         var appBundleName : String? = nil
@@ -578,7 +629,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             throw "lc.appList.infoPlistCannotReadError".loc
         }
 
-        var appRelativePath = "\(newAppInfo.bundleIdentifier()!).app"
+        var appRelativePath = "\(newAppInfo.bundleIdentifier()!.sanitizeNonACSII()).app"
         var outputFolder = LCPath.bundlePath.appendingPathComponent(appRelativePath)
         var appToReplace : LCAppModel? = nil
         // Folder exist! show alert for user to choose which bundle to replace
@@ -716,6 +767,12 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             } else {
                 let newAppModel = LCAppModel(appInfo: finalNewApp, delegate: self)
                 sharedModel.apps.append(newAppModel)
+                
+                // add url schemes
+                if let urlSchemes = finalNewApp.urlSchemes(), urlSchemes.count > 0 {
+                    UserDefaults.lcShared().mutableArrayValue(forKey: "LCGuestURLSchemes")
+                        .addObjects(from: urlSchemes as! [Any])
+                }
             }
 
             self.installprogressVisible = false
@@ -726,7 +783,77 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         guard let installUrlStr = await installUrlInput.open(), installUrlStr.count > 0 else {
             return
         }
+        if let url = URL(string:installUrlStr), url.scheme?.lowercased() == "itms-services" {
+            await installFromPlist(urlStr: installUrlStr)
+            return
+        }
         await installFromUrl(urlStr: installUrlStr)
+    }
+    
+    func installFromPlist(urlStr: String) async {
+        if self.installprogressVisible {
+            return
+        }
+        
+        if sharedModel.multiLCStatus == 2 {
+            errorInfo = "lc.appList.manageInPrimaryTip".loc
+            errorShow = true
+            return
+        }
+        
+        var plistUrlStr = urlStr.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if plistUrlStr.lowercased().hasPrefix("itms-services://") {
+            if let urlComponents = URLComponents(string: plistUrlStr),
+               let queryItems = urlComponents.queryItems,
+               let urlParam = queryItems.first(where: { $0.name == "url" })?.value {
+                plistUrlStr = urlParam
+            } else {
+                errorInfo = "lc.appList.plistInvalidError".loc
+                errorShow = true
+                return
+            }
+        }
+        
+        guard let plistUrl = URL(string: plistUrlStr) else {
+            errorInfo = "lc.appList.urlInvalidError".loc
+            errorShow = true
+            return
+        }
+        
+        do {
+            let (data, _) = try await URLSession.shared.data(from: plistUrl)
+            
+            guard let plist = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+                  let items = plist["items"] as? [[String: Any]],
+                  let firstItem = items.first,
+                  let assets = firstItem["assets"] as? [[String: Any]] else {
+                errorInfo = "lc.appList.plistParseError".loc
+                errorShow = true
+                return
+            }
+            
+            var ipaUrlStr: String?
+            for asset in assets {
+                if let kind = asset["kind"] as? String, kind == "software-package",
+                   let url = asset["url"] as? String {
+                    ipaUrlStr = url
+                    break
+                }
+            }
+            
+            guard let ipaUrlStr else {
+                errorInfo = "lc.appList.plistNoIpaError".loc
+                errorShow = true
+                return
+            }
+            
+            await installFromUrl(urlStr: ipaUrlStr)
+            
+        } catch {
+            errorInfo = error.localizedDescription
+            errorShow = true
+        }
     }
     
     func installFromUrl(urlStr: String) async {
@@ -894,7 +1021,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         }
 
         do {            
-            if #available(iOS 16.0, *), launchInMultitaskMode && appFound.uiIsShared {
+            if #available(iOS 16.0, *), launchInMultitaskMode {
                 try await appFound.runApp(multitask: true, containerFolderName: container, forceJIT: forceJIT)
             } else {
                 try await appFound.runApp(multitask: false, containerFolderName: container, forceJIT: forceJIT)
@@ -941,23 +1068,29 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             enableJITTask.cancel()
             return
         }
-        LCUtils.launchToGuestApp()
+        LCSharedUtils.launchToGuestApp()
 
     }
     
-    func jitLaunch(withPID pid: Int) async {
+    func jitLaunch(withPID pid: Int, withScript script: String? = nil) async {
         await MainActor.run {
-            if let url = URL(string: "stikjit://enable-jit?bundle-id=\(Bundle.main.bundleIdentifier!)pid=\(pid)") {
-                UIApplication.shared.open(url)
-            }
-        }
-    }
-
-    func jitLaunch(withPID pid: Int, withScript script: String) async {
-        await MainActor.run {
-            let encoded = script.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-            if let url = URL(string: "stikjit://enable-jit?bundle-id=\(Bundle.main.bundleIdentifier!)&pid=\(pid)&script-data=\(encoded)") {
-                UIApplication.shared.open(url)
+            let encoded = script?.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
+                .map { "&script-data=\($0)" } ?? ""
+            if let url = URL(string: "stikjit://enable-jit?bundle-id=\(Bundle.main.bundleIdentifier!)&pid=\(pid)\(encoded)") {
+                if let jitEnabler = JITEnablerType(rawValue: LCUtils.appGroupUserDefault.integer(forKey: "LCJITEnablerType")), jitEnabler == .StikJITLC {
+                    if let app = sharedModel.apps.first(where: { app in
+                        return app.appInfo.urlSchemes().contains("stikjit") &&
+                        (sharedModel.multiLCStatus != 2 || app.appInfo.isShared)
+                    }) {
+                        Task { await openWebView(urlString: url.absoluteString) }
+                    } else {
+                        errorInfo = "StikDebug is not found. Please install it first and switch it to shared app."
+                        errorShow = true
+                        return
+                    }
+                } else {
+                    UIApplication.shared.open(url)
+                }
             }
         }
     }
@@ -974,6 +1107,15 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     func openNavigationView(view: AnyView) {
         navigateTo = view
         isNavigationActive = true
+    }
+    
+    func promptForGeneratedIconStyle() async -> GeneratedIconStyle? {
+        if #available(iOS 18.0, *) {
+            return await generatedIconStyleSelector.open()
+        } else {
+            return .Light
+        }
+        
     }
     
     func closeNavigationView() {

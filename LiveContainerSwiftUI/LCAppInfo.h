@@ -23,6 +23,7 @@ typedef NS_ENUM(NSInteger, LCOrientationLock){
 @property bool dontLoadTweakLoader;
 @property bool dontInjectTweakLoader;
 @property UIColor* cachedColor;
+@property UIColor* cachedColorDark;
 @property LCOrientationLock orientationLock;
 @property bool fixFilePickerNew;
 @property bool fixLocalNotification;
@@ -37,20 +38,22 @@ typedef NS_ENUM(NSInteger, LCOrientationLock){
 @property (nonatomic, strong) NSString* jitLaunchScriptJs;
 @property NSDate* lastLaunched;
 @property NSDate* installationDate;
+@property NSString* remark;
 #if is32BitSupported
 @property bool is32bit;
 #endif
 - (void)setBundlePath:(NSString*)newBundlePath;
 - (NSMutableDictionary*)info;
-- (UIImage*)icon;
+- (UIImage*)iconIsDarkIcon:(BOOL)isDarkIcon;
+- (void)clearIconCache;
 - (NSString*)displayName;
 - (NSString*)bundlePath;
 - (NSString*)bundleIdentifier;
 - (NSString*)version;
-- (NSMutableArray*) urlSchemes;
+- (NSMutableArray<NSString *>*)urlSchemes;
 - (instancetype)initWithBundlePath:(NSString*)bundlePath;
-- (UIImage *)generateLiveContainerWrappedIcon;
-- (NSDictionary *)generateWebClipConfigWithContainerId:(NSString*)containerId;
+- (UIImage *)generateLiveContainerWrappedIconWithStyle:(GeneratedIconStyle)style;
+- (NSDictionary *)generateWebClipConfigWithContainerId:(NSString*)containerId iconStyle:(GeneratedIconStyle)style;
 - (void)save;
 - (void)patchExecAndSignIfNeedWithCompletionHandler:(void(^)(bool success, NSString* errorInfo))completetionHandler progressHandler:(void(^)(NSProgress* progress))progressHandler  forceSign:(BOOL)forceSign;
 @end
