@@ -55,10 +55,11 @@
     return nil;
 }
 
-+ (void)launchMultitaskGuestApp:(NSString *)displayName completionHandler:(void (^)(NSError *error))completionHandler {
++ (void)launchMultitaskGuestApp:(NSString *)displayName completionHandler:(void (^)(NSNumber *pid, NSError *error))completionHandler {
     if(!self.liveProcessBundleIdentifier) {
         NSError *error = [NSError errorWithDomain:displayName code:2 userInfo:@{NSLocalizedDescriptionKey: @"LiveProcess extension not found. Please reinstall LiveContainer and select Keep Extensions"}];
-        completionHandler(error);
+        if (completionHandler) completionHandler(nil, error);
+        return;
     }
     
     NSUserDefaults *lcUserDefaults = NSUserDefaults.standardUserDefaults;
@@ -71,49 +72,17 @@
     dispatch_async(dispatch_get_main_queue(), ^{
         if (@available(iOS 16.1, *)) {
             if(UIApplication.sharedApplication.supportsMultipleScenes && [NSUserDefaults.lcSharedDefaults integerForKey:@"LCMultitaskMode"] == 1) {
-                [MultitaskWindowManager openAppWindowWithDisplayName:displayName dataUUID:dataUUID bundleId:bundleId];
+                [MultitaskWindowManager openAppWindowWithDisplayName:displayName dataUUID:dataUUID bundleId:bundleId pidCallback:completionHandler];
                 MultitaskDockManager *dock = [MultitaskDockManager shared];
                 [dock addRunningApp:displayName appUUID:dataUUID view:nil];
-                
-                completionHandler(nil);
                 return;
             }
         }
-        
-        UIViewController *rootVC = ((UIWindowScene *)UIApplication.sharedApplication.connectedScenes.anyObject).keyWindow.rootViewController;
-        
 
-        DecoratedAppSceneViewController *launcherView = [[DecoratedAppSceneViewController alloc] initWindowName:displayName bundleId:bundleId dataUUID:dataUUID rootVC:rootVC];
-        launcherView.view.autoresizingMask = UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleBottomMargin;
-        completionHandler(nil);
-        
-    });
-    
-}
-
-+ (void)launchMultitaskGuestAppWithPIDCallback:(NSString *)displayName pidCompletionHandler:(void (^)(NSNumber *pid, NSError *error))completionHandler {
-    if(!self.liveProcessBundleIdentifier) {
-        NSError *error = [NSError errorWithDomain:displayName code:2 userInfo:@{NSLocalizedDescriptionKey: @"LiveProcess extension not found. Please reinstall LiveContainer and select Keep Extensions"}];
-        if (completionHandler) completionHandler(nil, error);
-        return;
-    }
-
-    NSUserDefaults *lcUserDefaults = NSUserDefaults.standardUserDefaults;
-    NSString* bundleId = [lcUserDefaults stringForKey:@"selected"];
-    NSString* dataUUID = [lcUserDefaults stringForKey:@"selectedContainer"];
-
-    [lcUserDefaults removeObjectForKey:@"selected"];
-    [lcUserDefaults removeObjectForKey:@"selectedContainer"];
-
-    dispatch_async(dispatch_get_main_queue(), ^{
         UIViewController *rootVC = ((UIWindowScene *)UIApplication.sharedApplication.connectedScenes.anyObject).keyWindow.rootViewController;
         DecoratedAppSceneViewController *launcherView = [[DecoratedAppSceneViewController alloc] initWindowName:displayName bundleId:bundleId dataUUID:dataUUID rootVC:rootVC];
         // Wire PID callback
-        launcherView.pidAvailableHandler = ^(NSNumber *pid, NSError *error) {
-            if (completionHandler) {
-                completionHandler(pid, error);
-            }
-        };
+        launcherView.pidAvailableHandler = completionHandler;
         launcherView.view.autoresizingMask = UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleBottomMargin;
         launcherView.view.center = rootVC.view.center;
         [rootVC addChildViewController:launcherView];
@@ -298,7 +267,7 @@
 
 }
 
-+ (NSURL *)archiveIPAWithBundleName:(NSString*)newBundleName excludingInfoPlistKeys:(NSArray *)keysToExclude error:(NSError **)error {
++ (NSURL *)archiveIPAWithBundleName:(NSString*)newBundleName includingExtraInfoDict:(NSDictionary *)extraInfoDict error:(NSError **)error {
     if (*error) return nil;
 
     NSFileManager *manager = NSFileManager.defaultManager;
@@ -337,14 +306,14 @@
         [infoDict[@"CFBundleURLTypes"] removeLastObject];
     }
     [infoDict removeObjectForKey:@"UTExportedTypeDeclarations"];
-    
+
     if (isThird) {
         infoDict[@"CFBundleIconName"] = @"AppIconThird";
         if (infoDict[@"CFBundleIcons"][@"CFBundlePrimaryIcon"][@"CFBundleIconName"]) {
             infoDict[@"CFBundleIcons"][@"CFBundlePrimaryIcon"][@"CFBundleIconName"] = @"AppIconThird";
         }
         infoDict[@"CFBundleIcons"][@"CFBundlePrimaryIcon"][@"CFBundleIconFiles"][0] = @"AppIconThird60x60";
-        
+
         if (infoDict[@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconName"]) {
             infoDict[@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconName"] = @"AppIconThird";
         }
@@ -356,15 +325,15 @@
             infoDict[@"CFBundleIcons"][@"CFBundlePrimaryIcon"][@"CFBundleIconName"] = @"AppIconGrey";
         }
         infoDict[@"CFBundleIcons"][@"CFBundlePrimaryIcon"][@"CFBundleIconFiles"][0] = @"AppIconGrey60x60";
-        
+
         if (infoDict[@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconName"]) {
             infoDict[@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconName"] = @"AppIconGrey";
         }
         infoDict[@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconFiles"][0] = @"AppIconGrey60x60";
         infoDict[@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconFiles"][1] = @"AppIconGrey76x76";
     }
-    
-    [infoDict removeObjectsForKeys:keysToExclude];
+
+    [infoDict addEntriesFromDictionary:extraInfoDict];
     
     // reset a executable name so they don't look the same on the log
     NSURL* appBundlePath = [tmpPayloadPath URLByAppendingPathComponent:@"App.app"];
@@ -458,16 +427,16 @@
         [infoDict removeObjectForKey:@"INIntentsSupported"];
         [infoDict removeObjectForKey:@"NSUserActivityTypes"];
     }
-    
+
     [infoDict writeToURL:infoPath error:error];
-    
+
     dlopen("/System/Library/PrivateFrameworks/PassKitCore.framework/PassKitCore", RTLD_GLOBAL);
     NSData *zipData = [[NSClassFromString(@"PKZipArchiver") new] zippedDataForURL:tmpPayloadPath.URLByDeletingLastPathComponent];
     if (!zipData) return nil;
 
     [manager removeItemAtURL:tmpPayloadPath error:error];
     if (*error) return nil;
-    
+
     if([manager fileExistsAtPath:tmpIPAPath.path]) {
         [manager removeItemAtURL:tmpIPAPath error:error];
         if (*error) return nil;
@@ -491,13 +460,13 @@
     [manager removeItemAtURL:tmpPayloadPath error:nil];
     [manager createDirectoryAtURL:tmpPayloadPath withIntermediateDirectories:YES attributes:nil error:error];
     if (*error) return nil;
-    
+
     NSURL *tmpIPAPath = [tmpPath URLByAppendingPathComponent:@"LiveContainer3.ipa"];
-    
+
 
     [manager copyItemAtURL:bundlePath toURL:[tmpPayloadPath URLByAppendingPathComponent:@"App.app"] error:error];
     if (*error) return nil;
-    
+
     NSURL *infoPath = [tmpPayloadPath URLByAppendingPathComponent:@"App.app/Info.plist"];
     NSMutableDictionary *infoDict = [NSMutableDictionary dictionaryWithContentsOfURL:infoPath];
     if (!infoDict) return nil;
@@ -515,20 +484,20 @@
         infoDict[@"CFBundleIcons"][@"CFBundlePrimaryIcon"][@"CFBundleIconName"] = @"AppIconThird";
     }
     infoDict[@"CFBundleIcons"][@"CFBundlePrimaryIcon"][@"CFBundleIconFiles"][0] = @"AppIconThird60x60";
-    
+
     if (infoDict[@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconName"]) {
         infoDict[@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconName"] = @"AppIconThird";
     }
     infoDict[@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconFiles"][0] = @"AppIconThird60x60";
     infoDict[@"CFBundleIcons~ipad"][@"CFBundlePrimaryIcon"][@"CFBundleIconFiles"][1] = @"AppIconThird76x76";
-    
+
     // reset a executable name so they don't look the same on the log
     NSURL* appBundlePath = [tmpPayloadPath URLByAppendingPathComponent:@"App.app"];
-    
+
     NSURL* execFromPath = [appBundlePath URLByAppendingPathComponent:infoDict[@"CFBundleExecutable"]];
     infoDict[@"CFBundleExecutable"] = @"LiveContainer3";
     NSURL* execToPath = [appBundlePath URLByAppendingPathComponent:infoDict[@"CFBundleExecutable"]];
-    
+
     // MARK: patch main executable
     // we remove the teamId after app group id so it can be correctly signed by AltSign.
     NSString* entitlementXML = getLCEntitlementXML();
@@ -540,7 +509,7 @@
     if(*error) {
         return nil;
     }
-    
+
     NSString* teamId = dict[@"com.apple.developer.team-identifier"];
     if(![teamId isKindOfClass:NSString.class]) {
         *error = [NSError errorWithDomain:@"archiveIPA2WithBundleName" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"com.apple.developer.team-identifier is not a string!"}];
@@ -551,7 +520,7 @@
         @"group.com.SideStore.SideStore",
         @"group.com.rileytestut.AltStore",
     ];
-    
+
     // remove the team id prefix in app group id added by SideStore/AltStore
     for(NSString* appGroup in appGroupsToFind) {
         NSUInteger appGroupCount = [dict[@"com.apple.security.application-groups"] count];
@@ -562,17 +531,17 @@
             }
         }
     }
-    
+
     // set correct application-identifier
     dict[@"application-identifier"] = [NSString stringWithFormat:@"%@.%@", teamId, infoDict[@"CFBundleIdentifier"]];
-    
+
     // For TrollStore
     NSString* containerId = dict[@"com.apple.private.security.container-required"];
     if(containerId) {
         dict[@"com.apple.private.security.container-required"] = infoDict[@"CFBundleIdentifier"];
     }
-    
-    
+
+
     // We have to change executable's UUID so iOS won't consider 2 executables the same
     NSString* errorChangeUUID = LCParseMachO([execFromPath.path UTF8String], false, ^(const char *path, struct mach_header_64 *header, int fd, void* filePtr) {
         LCChangeMachOUUID(header);
@@ -585,7 +554,7 @@
         NSLog(@"[LC] %@", errorChangeUUID);
         return nil;
     }
-    
+
     NSData* newEntitlementData = [NSPropertyListSerialization dataWithPropertyList:dict format:NSPropertyListXMLFormat_v1_0 options:0 error:error];
     [LCUtils loadStoreFrameworksWithError2:error];
     BOOL adhocSignSuccess = [NSClassFromString(@"ZSigner") adhocSignMachOAtPath:execFromPath.path bundleId:infoDict[@"CFBundleIdentifier"] entitlementData:newEntitlementData];
@@ -593,15 +562,15 @@
         *error = [NSError errorWithDomain:@"archiveIPA2WithBundleName" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"Failed to adhoc sign main executable!"}];
         return nil;
     }
-    
+
     // MARK: archive bundle
-    
+
     [manager moveItemAtURL:execFromPath toURL:execToPath error:error];
     if (*error) {
         NSLog(@"[LC] %@", *error);
         return nil;
     }
-        
+
     // we remove the extension
     [manager removeItemAtURL:[appBundlePath URLByAppendingPathComponent:@"PlugIns"] error:error];
     // remove all sidestore stuff
@@ -617,7 +586,7 @@
         [infoDict removeObjectForKey:@"INIntentsSupported"];
         [infoDict removeObjectForKey:@"NSUserActivityTypes"];
     }
-    
+
     [infoDict writeToURL:infoPath error:error];
     
     dlopen("/System/Library/PrivateFrameworks/PassKitCore.framework/PassKitCore", RTLD_GLOBAL);
