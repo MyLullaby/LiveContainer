@@ -212,6 +212,9 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
         sleep(100);
     }
     if (!LCSharedUtils.certificatePassword && !isSideStore) {
+        if(@available(iOS 26.0 ,*))  {
+            return @"JITLess mode is required since iOS 26. Please set it up in settings.";
+        }
         // First of all, let's check if we have JIT
         for (int i = 0; i < 10 && !checkJITEnabled(); i++) {
             usleep(1000*100);
@@ -288,7 +291,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
         return @"Container not found!";
     }
     
-    if(isLiveProcess) {
+    if(isLiveProcess && !isSideStore) {
         lcAppUrlScheme = [lcUserDefaults stringForKey:@"hostUrlScheme"];
         [lcUserDefaults removeObjectForKey:@"hostUrlScheme"];
     }
