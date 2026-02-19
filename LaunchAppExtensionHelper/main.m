@@ -12,6 +12,6 @@
 @implementation LaunchAppExtensionHelperHandler
 - (void)beginRequestWithExtensionContext:(NSExtensionContext *)context {
     // unfortunately SpringBoard blocks openURL for iOS 10+ new extension types, so we need to chain load another extension with old extension type to open the URL
-    [[PrivClass(LSApplicationWorkspace) defaultWorkspace] openURL:[NSURL URLWithString:[[context.inputItems.firstObject userInfo] valueForKey:@"url"]]];
+    [[PrivClass(LSApplicationWorkspace) defaultWorkspace] openURL:[[context.inputItems.firstObject userInfo] valueForKey:@"url"]];
 }
 @end

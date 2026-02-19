@@ -12,7 +12,7 @@ extension String: @retroactive Error {}
 
 struct LaunchAppExtension: AppIntent {
     static var title: LocalizedStringResource { "Launch App" }
-    static var description: IntentDescription { "Please note that this shortcut does not launch the app directly due to iOS limitations. Instead, it setups the launch config and returns an URL. To actually launch the app, add a \"Open URLs\" action that opens the URL it returns." }
+    static var description: IntentDescription { "This action directly launches an app in LiveContainer. To get the launch URL, open LiveContainer, hold the app, tap \"Add to Home Screen\" -> \"Copy Launch URL\"" }
     @Parameter(title: "Launch URL")
     var launchURL: URL
     
@@ -45,21 +45,21 @@ struct LaunchAppExtension: AppIntent {
         var ext : NSExtension? = LaunchAppExtension.ext
         if ext == nil {
             do {
-                ext = try NSExtension(identifier: "com.kdt.livecontainer.L53N95M28Y.LaunchAppExtensionHelper" )
+                ext = try NSExtension(identifier: ((Bundle.main.bundleIdentifier! as NSString).deletingPathExtension as NSString).appendingPathExtension("LaunchAppExtensionHelper") )
                 LaunchAppExtension.ext = ext
             } catch {
                 NSLog("Failed to start extension \(error)")
                 throw NSError(domain: "LaunchAppExtension", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to start extension \(error). To use the Launch App shortcut, reinstall LiveContainer with LaunchAppExtension and LaunchAppExtensionHelper installed. If you use SideStore, choose \"Keep App Extensions (Use Main Profile)\". If you use Impactor, choose \"Only Register Main Bundle\". For other sideloaders, select keep all extensions, i.e. DO NOT Remove any extension."])
             }
-            
+
         }
         let extensionItem = NSExtensionItem()
         extensionItem.userInfo = [
-            "url": url.absoluteString,
+            "url": url,
         ]
         await ext?.beginRequest(withInputItems: [extensionItem])
     }
-    
+
     func perform() async throws -> some IntentResult {
         // sanitize url
         if launchURL.scheme != "livecontainer" && launchURL.scheme != "sidestore" {
