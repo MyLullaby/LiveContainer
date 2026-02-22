@@ -85,8 +85,6 @@
         launcherView.pidAvailableHandler = completionHandler;
         launcherView.view.autoresizingMask = UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleBottomMargin;
         launcherView.view.center = rootVC.view.center;
-        [rootVC addChildViewController:launcherView];
-        [rootVC.view addSubview:launcherView.view];
     });
 }
 
