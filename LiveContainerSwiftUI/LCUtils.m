@@ -413,7 +413,7 @@
         return nil;
     }
     
-    // re don't care about errors when removing unnecessary files. errors occur probably because the file does not exist
+    // we don't care about errors when removing unnecessary files. errors occur probably because the file does not exist
     // we remove the extension
     [manager removeItemAtURL:[appBundlePath URLByAppendingPathComponent:@"PlugIns"] error:nil];
     // remove all sidestore stuff
