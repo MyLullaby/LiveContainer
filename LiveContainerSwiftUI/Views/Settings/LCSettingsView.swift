@@ -182,7 +182,7 @@ struct LCSettingsView: View {
                         }
                     }
                     Picker(selection: $JITEnabler) {
-                        ForEach(JITEnablerType.allCases.indicies, id: \.self) { enablerType in
+                        ForEach(JITEnablerType.allCases) { enablerType in
                             Text(enablerType.displayName).tag(enablerType)
                         }
                     } label: {
