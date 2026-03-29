@@ -393,7 +393,7 @@ extension LCUtils {
             
             await UIApplication.shared.open(URL(string: launchURLStr)!)
             
-        } else if jitEnabler == .StkiJIT || jitEnabler == .StikJITLC {
+        } else if jitEnabler == .StikJIT || jitEnabler == .StikJITLC {
             var launchURLStr = "stikjit://enable-jit?bundle-id=\(Bundle.main.bundleIdentifier!)"
 
             if let script = script, !script.isEmpty {
