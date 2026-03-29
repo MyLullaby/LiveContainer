@@ -15,7 +15,7 @@ enum JITEnablerType : Int {
     case StikJITLC = 3
     case SideStore = 4
     case StosDebug = 5
-    case StosDebugLC = 5
+    case StosDebugLC = 6
 }
 
 struct LCSettingsView: View {
