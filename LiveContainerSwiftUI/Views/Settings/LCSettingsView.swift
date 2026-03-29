@@ -8,7 +8,8 @@
 import Foundation
 import SwiftUI
 
-enum JITEnablerType : Int, CaseIterable {
+enum JITEnablerType : Int, CaseIterable, Identifiable {
+    var id: Int { rawValue }
     case SideJITServer = 0
     case StikJIT = 1
     case JITStreamerEBLegacy = 2
@@ -181,7 +182,7 @@ struct LCSettingsView: View {
                         }
                     }
                     Picker(selection: $JITEnabler) {
-                        ForEach(JITEnablerType.allCases) { enablerType in
+                        ForEach(JITEnablerType.allCases.indicies, id: \.self) { enablerType in
                             Text(enablerType.displayName).tag(enablerType)
                         }
                     } label: {
