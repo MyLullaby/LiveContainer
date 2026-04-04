@@ -73,8 +73,8 @@ struct LCMultiLCManagementView : View, InstallAnotherLCButtonDelegate {
                     Text("lc.settings.multiLCInstall.allowGameMode".loc)
                 }
             }
-            InstallAnotherLCButton(lcName: "LCalendar", delegate: self)
-            InstallAnotherLCButton(lcName: "LStar", delegate: self)
+            InstallAnotherLCButton(lcName: "LiveContainer2", delegate: self)
+            InstallAnotherLCButton(lcName: "LiveContainer3", delegate: self)
         }
         .alert("lc.settings.multiLCInstall".loc, isPresented: $installLC2Alert.show) {
             if(UserDefaults.sideStoreExist()) {

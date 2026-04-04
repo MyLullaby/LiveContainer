@@ -286,8 +286,17 @@
     NSURL *infoPath = [tmpPayloadPath URLByAppendingPathComponent:@"App.app/Info.plist"];
     NSMutableDictionary *infoDict = [NSMutableDictionary dictionaryWithContentsOfURL:infoPath];
     if (!infoDict) return nil;
-
-    infoDict[@"CFBundleDisplayName"] = newBundleName;
+    
+    NSString *displayName = newBundleName;
+    if ([newBundleName caseInsensitiveCompare:@"LiveContainer2"] == NSOrderedSame) {
+        displayName = @"LCalendar";
+    }
+    
+    if ([newBundleName caseInsensitiveCompare:@"LiveContainer3"] == NSOrderedSame) {
+        displayName = @"LStar";
+    }
+    
+    infoDict[@"CFBundleDisplayName"] = displayName;
     infoDict[@"CFBundleName"] = newBundleName;
     infoDict[@"CFBundleIdentifier"] = [NSString stringWithFormat:@"com.kdt.%@", newBundleName];
     infoDict[@"CFBundleURLTypes"][0][@"CFBundleURLSchemes"][0] = [newBundleName lowercaseString];
