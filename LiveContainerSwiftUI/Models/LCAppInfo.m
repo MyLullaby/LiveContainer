@@ -504,7 +504,7 @@ uint32_t dyld_get_sdk_version(const struct mach_header* mh);
     if(_info[@"hideLiveContainer"] != nil) {
         return [_info[@"hideLiveContainer"] boolValue];
     } else {
-        return NO;
+        return YES;
     }
 }
 - (void)setHideLiveContainer:(bool)hideLiveContainer {
@@ -516,7 +516,7 @@ uint32_t dyld_get_sdk_version(const struct mach_header* mh);
     if(_info[@"dontInjectTweakLoader"] != nil) {
         return [_info[@"dontInjectTweakLoader"] boolValue];
     } else {
-        return NO;
+        return YES;
     }
 }
 - (void)setDontInjectTweakLoader:(bool)dontInjectTweakLoader {
@@ -534,7 +534,7 @@ uint32_t dyld_get_sdk_version(const struct mach_header* mh);
     if(_info[@"dontLoadTweakLoader"] != nil) {
         return [_info[@"dontLoadTweakLoader"] boolValue];
     } else {
-        return NO;
+        return YES;
     }
 }
 - (void)setDontLoadTweakLoader:(bool)dontLoadTweakLoader {
