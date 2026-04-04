@@ -36,7 +36,7 @@ struct LCAppBanner : View {
     @State private var errorInfo = ""
     
     @AppStorage("dynamicColors", store: LCUtils.appGroupUserDefault) var dynamicColors = true
-    @AppStorage("darkModeIcon", store: LCUtils.appGroupUserDefault) var darkModeIcon = false
+    @AppStorage("LCIconStyle", store: LCUtils.appGroupUserDefault) var iconStyle = 0
     @AppStorage("LCLaunchInMultitaskMode") var launchInMultitaskMode = false
     @State private var mainColor : Color
     @State private var icon: UIImage
@@ -52,7 +52,9 @@ struct LCAppBanner : View {
         
         _model = ObservedObject(wrappedValue: appModel)
         _mainColor = State(initialValue: Color.clear)
-        _icon = State(initialValue: appModel.appInfo.iconIsDarkIcon(LCUtils.appGroupUserDefault.bool(forKey: "darkModeIcon")))
+        let storedIconStyle = LCUtils.appGroupUserDefault.integer(forKey: "LCIconStyle")
+        let isDark = storedIconStyle == 1 || (storedIconStyle == 2 && UITraitCollection.current.userInterfaceStyle == .dark)
+        _icon = State(initialValue: appModel.appInfo.iconIsDarkIcon(isDark))
         _mainColor = State(initialValue: extractMainHueColor())
 
     }
@@ -230,9 +232,17 @@ struct LCAppBanner : View {
         } message: {
             Text(errorInfo)
         }
-        .onChange(of: darkModeIcon) { newVal in
-            icon = appInfo.iconIsDarkIcon(newVal)
+        .onChange(of: iconStyle) { newVal in
+            let isDark = newVal == 1 || (newVal == 2 && colorScheme == .dark)
+            icon = appInfo.iconIsDarkIcon(isDark)
             mainColor = extractMainHueColor()
+        }
+        .onChange(of: colorScheme) { newScheme in
+            if iconStyle == 2 {
+                let isDark = newScheme == .dark
+                icon = appInfo.iconIsDarkIcon(isDark)
+                mainColor = extractMainHueColor()
+            }
         }
     }
     
@@ -423,13 +433,14 @@ struct LCAppBanner : View {
     }
     
     func extractMainHueColor() -> Color {
-        if !darkModeIcon, let cachedColor = appInfo.cachedColor {
+        let isDark = iconStyle == 1 || (iconStyle == 2 && colorScheme == .dark)
+        if !isDark, let cachedColor = appInfo.cachedColor {
             return Color(uiColor: cachedColor)
-        } else if darkModeIcon, let cachedColor = appInfo.cachedColorDark {
+        } else if isDark, let cachedColor = appInfo.cachedColorDark {
             return Color(uiColor: cachedColor)
         }
         
-        guard let cgImage = appInfo.iconIsDarkIcon(darkModeIcon).cgImage else { return Color.clear }
+        guard let cgImage = appInfo.iconIsDarkIcon(isDark).cgImage else { return Color.clear }
 
         let width = 1
         let height = 1
@@ -464,7 +475,7 @@ struct LCAppBanner : View {
         }
         
         let ans = Color(hue: hue, saturation: saturation, brightness: brightness)
-        if darkModeIcon {
+        if isDark {
             appInfo.cachedColorDark = UIColor(ans)
         } else {
             appInfo.cachedColor = UIColor(ans)

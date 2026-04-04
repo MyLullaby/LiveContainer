@@ -10,7 +10,9 @@ import Combine
 struct LCCustomSortView: View {
     @EnvironmentObject private var sharedModel: SharedModel
     @Environment(\.presentationMode) var presentationMode
-    @AppStorage("darkModeIcon", store: LCUtils.appGroupUserDefault) var darkModeIcon = false
+    @Environment(\.colorScheme) var colorScheme
+    @AppStorage("LCIconStyle", store: LCUtils.appGroupUserDefault) var iconStyle = 0
+
     
     // Local state for editing without modifying shared model
     @State private var localApps: [LCAppModel] = []
@@ -23,7 +25,7 @@ struct LCCustomSortView: View {
                 if !localApps.isEmpty {
                         ForEach(localApps, id: \.self) { app in
                             HStack {
-                                Image(uiImage: app.appInfo.iconIsDarkIcon(darkModeIcon))
+                                Image(uiImage: app.appInfo.iconIsDarkIcon(iconStyle == 1 || (iconStyle == 2 && colorScheme == .dark)))
                                     .resizable()
                                     .frame(width: 60, height: 60)
                                     .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -55,7 +57,7 @@ struct LCCustomSortView: View {
                     Section("lc.appList.hiddenApps".loc) {
                         ForEach(localHiddenApps, id: \.self) { app in
                              HStack {
-                                Image(uiImage: app.appInfo.iconIsDarkIcon(darkModeIcon))
+                                Image(uiImage: app.appInfo.iconIsDarkIcon(iconStyle == 1 || (iconStyle == 2 && colorScheme == .dark)))
                                     .resizable()
                                     .frame(width: 60, height: 60)
                                     .clipShape(RoundedRectangle(cornerRadius: 12))

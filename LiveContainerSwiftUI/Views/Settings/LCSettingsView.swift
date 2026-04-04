@@ -38,7 +38,7 @@ struct LCSettingsView: View {
     @AppStorage("LCDontSignApp", store: LCUtils.appGroupUserDefault) var dontSignApp = false
     @AppStorage("LCStrictHiding", store: LCUtils.appGroupUserDefault) var strictHiding = false
     @AppStorage("dynamicColors", store: LCUtils.appGroupUserDefault) var dynamicColors = true
-    @AppStorage("darkModeIcon", store: LCUtils.appGroupUserDefault) var darkModeIcon = false
+    @AppStorage("LCIconStyle", store: LCUtils.appGroupUserDefault) var iconStyle = 0
     
     @AppStorage("LCSideJITServerAddress", store: LCUtils.appGroupUserDefault) var sideJITServerAddress : String = ""
     @AppStorage("LCDeviceUDID", store: LCUtils.appGroupUserDefault) var deviceUDID: String = ""
@@ -186,16 +186,31 @@ struct LCSettingsView: View {
                     Toggle(isOn: $dynamicColors) {
                         Text("lc.settings.dynamicColors".loc)
                     }
-                    if #available(iOS 18.0, *) {
-                        Toggle(isOn: $darkModeIcon) {
-                            Text("lc.settings.darkModeIcon".loc)
-                        }
+                    Picker(selection: $iconStyle) {
+                        Text("lc.settings.iconStyle.light".loc).tag(0)
+                        Text("lc.settings.iconStyle.dark".loc).tag(1)
+                        Text("lc.settings.iconStyle.automatic".loc).tag(2)
+                    } label: {
+                        Text("lc.settings.iconStyle".loc)
                     }
                     
                 } header: {
                     Text("lc.settings.interface".loc)
                 } footer: {
                     Text("lc.settings.dynamicColors.desc".loc)
+                }
+                
+                Section {
+                    NavigationLink {
+                        LCAppIconPickerView()
+                    } label: {
+                        HStack {
+                            Text("lc.settings.appIcon".loc)
+                            Spacer()
+                            Text(currentAppIconDisplayName())
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
                 Section{
                     Toggle(isOn: $frameShortIcon) {
@@ -430,6 +445,19 @@ struct LCSettingsView: View {
             guard sharedModel.selectedTab == .settings, let link else { return }
             sharedModel.deepLink = nil
             handleURL(url: link)
+        }
+    }
+    
+    func currentAppIconDisplayName() -> String {
+        switch UIApplication.shared.alternateIconName {
+        case "AppIconBooks":
+            return "Books"
+        case "AppIconCalendar":
+            return "Calendar"
+        case "AppIconSparkles":
+            return "Sparkles"
+        default:
+            return "Books"
         }
     }
     

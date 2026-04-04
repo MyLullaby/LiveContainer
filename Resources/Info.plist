@@ -25,6 +25,32 @@
 	<string>AppIcon</string>
 	<key>CFBundleIconUsesAutomaticDarkModeVariant</key>
 	<true/>
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconName</key>
+			<string>AppIcon</string>
+		</dict>
+		<key>CFBundleAlternateIcons</key>
+		<dict>
+			<key>AppIconBooks</key>
+			<dict>
+				<key>CFBundleIconName</key>
+				<string>AppIconBooks</string>
+			</dict>
+			<key>AppIconCalendar</key>
+			<dict>
+				<key>CFBundleIconName</key>
+				<string>AppIconCalendar</string>
+			</dict>
+			<key>AppIconSparkles</key>
+			<dict>
+				<key>CFBundleIconName</key>
+				<string>AppIconSparkles</string>
+			</dict>
+		</dict>
+	</dict>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
