@@ -298,6 +298,24 @@
     
     infoDict[@"CFBundleDisplayName"] = displayName;
     infoDict[@"CFBundleName"] = newBundleName;
+    
+    // 更新所有本地化 InfoPlist.strings 中的 CFBundleDisplayName，防止本地化名称覆盖 Info.plist 中的设置
+    NSURL *appBundleURL = [tmpPayloadPath URLByAppendingPathComponent:@"App.app"];
+    NSArray *contents = [manager contentsOfDirectoryAtURL:appBundleURL includingPropertiesForKeys:nil options:0 error:nil];
+    for (NSURL *item in contents) {
+        if ([item.lastPathComponent hasSuffix:@".lproj"]) {
+            NSURL *stringsFile = [item URLByAppendingPathComponent:@"InfoPlist.strings"];
+            if ([manager fileExistsAtPath:stringsFile.path]) {
+                NSMutableDictionary *stringsDict = [NSMutableDictionary dictionaryWithContentsOfURL:stringsFile];
+                if (stringsDict) {
+                    stringsDict[@"CFBundleDisplayName"] = displayName;
+                    stringsDict[@"CFBundleName"] = newBundleName;
+                    [stringsDict writeToURL:stringsFile atomically:YES];
+                }
+            }
+        }
+    }
+    
     infoDict[@"CFBundleIdentifier"] = [NSString stringWithFormat:@"com.kdt.%@", newBundleName];
     infoDict[@"CFBundleURLTypes"][0][@"CFBundleURLSchemes"][0] = [newBundleName lowercaseString];
     while([infoDict[@"CFBundleURLTypes"] count] > 1) {
