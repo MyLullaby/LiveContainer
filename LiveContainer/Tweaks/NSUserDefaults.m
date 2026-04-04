@@ -13,6 +13,9 @@
 #include "Tweaks.h"
 @import ObjectiveC;
 @import MachO;
+@import CloudKit;
+@import Intents;
+@import UserNotifications;
 
 BOOL hook_return_false(void) {
     return NO;
@@ -103,13 +106,13 @@ void NUDGuestHooksInit(void) {
     }
 
     // 处理iCloud
-    swizzleClassMethod(CKContainer.class, @selector(defaultContainer), @selector(hook_defaultContainer));
-    swizzleClassMethod(CKContainer.class, @selector(containerWithIdentifier:),@selector(hook_containerWithIdentifier:));
+    swizzle(CKContainer.class, @selector(defaultContainer), @selector(hook_defaultContainer));
+    swizzle(CKContainer.class, @selector(containerWithIdentifier:),@selector(hook_containerWithIdentifier:));
     // 处理Siri
-    swizzleClassMethod(INPreferences.class, @selector(requestSiriAuthorization:),@selector(hook_requestSiriAuthorization:));
-    swizzleClassMethod(INPreferences.class, @selector(siriAuthorizationStatus),@selector(hook_siriAuthorizationStatus));
-    swizzleClassMethod(INVocabulary.class, @selector(sharedVocabulary),@selector(hook_sharedVocabulary));
-    swizzleClassMethod(INPlayMediaIntent.class, @selector(initWithMediaItems:mediaItems:mediaContainer:playShuffled:playbackRepeatMode:resumePlayback:playbackQueueLocation:playbackSpeed:mediaSearch:),@selector(hook_initWithMediaItems:mediaItems:mediaContainer:playShuffled:playbackRepeatMode:resumePlayback:playbackQueueLocation:playbackSpeed:mediaSearch:));
+    swizzle(INPreferences.class, @selector(requestSiriAuthorization:),@selector(hook_requestSiriAuthorization:));
+    swizzle(INPreferences.class, @selector(siriAuthorizationStatus),@selector(hook_siriAuthorizationStatus));
+    swizzle(INVocabulary.class, @selector(sharedVocabulary),@selector(hook_sharedVocabulary));
+    swizzle(INPlayMediaIntent.class, @selector(initWithMediaItems:mediaItems:mediaContainer:playShuffled:playbackRepeatMode:resumePlayback:playbackQueueLocation:playbackSpeed:mediaSearch:),@selector(hook_initWithMediaItems:mediaItems:mediaContainer:playShuffled:playbackRepeatMode:resumePlayback:playbackQueueLocation:playbackSpeed:mediaSearch:));
 
     // 处理通知权限
     swizzle(UNNotificationSettings.class, @selector(authorizationStatus), @selector(hook_authorizationStatus));
