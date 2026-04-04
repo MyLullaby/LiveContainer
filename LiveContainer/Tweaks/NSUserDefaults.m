@@ -112,7 +112,7 @@ void NUDGuestHooksInit(void) {
     swizzle(INPreferences.class, @selector(requestSiriAuthorization:),@selector(hook_requestSiriAuthorization:));
     swizzle(INPreferences.class, @selector(siriAuthorizationStatus),@selector(hook_siriAuthorizationStatus));
     swizzle(INVocabulary.class, @selector(sharedVocabulary),@selector(hook_sharedVocabulary));
-    swizzle(INPlayMediaIntent.class, @selector(initWithMediaItems:mediaItems:mediaContainer:playShuffled:playbackRepeatMode:resumePlayback:playbackQueueLocation:playbackSpeed:mediaSearch:),@selector(hook_initWithMediaItems:mediaItems:mediaContainer:playShuffled:playbackRepeatMode:resumePlayback:playbackQueueLocation:playbackSpeed:mediaSearch:));
+    swizzle(INPlayMediaIntent.class, @selector(initWithMediaItems:mediaContainer:playShuffled:playbackRepeatMode:resumePlayback:playbackQueueLocation:playbackSpeed:mediaSearch:),@selector(hook_initWithMediaItems:mediaContainer:playShuffled:playbackRepeatMode:resumePlayback:playbackQueueLocation:playbackSpeed:mediaSearch:));
 
     // 处理通知权限
     swizzle(UNNotificationSettings.class, @selector(authorizationStatus), @selector(hook_authorizationStatus));
