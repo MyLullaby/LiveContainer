@@ -47,6 +47,14 @@ struct LCDataManagementView : View {
     
         Form {
             Section {
+                NavigationLink {
+                    LCStorageManagementView()
+                } label: {
+                    Text("lc.settings.storageManagement".loc)
+                }
+            }
+
+            Section {
                 if sharedModel.multiLCStatus != 2 {
                     Button {
                         moveAppGroupFolderFromPrivateToAppGroup()
