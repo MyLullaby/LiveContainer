@@ -21,10 +21,6 @@ BOOL hook_return_false(void) {
     return NO;
 }
 
-void swizzle(Class class, SEL originalAction, SEL swizzledAction) {
-    method_exchangeImplementations(class_getInstanceMethod(class, originalAction), class_getInstanceMethod(class, swizzledAction));
-}
-
 void swizzle2(Class class, SEL originalAction, Class class2, SEL swizzledAction) {
     Method m1 = class_getInstanceMethod(class2, swizzledAction);
     class_addMethod(class, swizzledAction, method_getImplementation(m1), method_getTypeEncoding(m1));
@@ -105,13 +101,22 @@ void NUDGuestHooksInit(void) {
         [fm createDirectoryAtPath:preferenceFolderPath.path withIntermediateDirectories:YES attributes:@{} error:&error];
     }
 
-    // 处理iCloud
-    swizzle(CKContainer.class, @selector(defaultContainer), @selector(hook_defaultContainer));
-    swizzle(CKContainer.class, @selector(containerWithIdentifier:),@selector(hook_containerWithIdentifier:));
-    // 处理Siri
-    swizzle(INPreferences.class, @selector(requestSiriAuthorization:),@selector(hook_requestSiriAuthorization:));
-    swizzle(INPreferences.class, @selector(siriAuthorizationStatus),@selector(hook_siriAuthorizationStatus));
-    swizzle(INVocabulary.class, @selector(sharedVocabulary),@selector(hook_sharedVocabulary));
+    // 处理iCloud（类方法需要使用 swizzleClassMethod）
+    swizzleClassMethod(CKContainer.class, @selector(defaultContainer), @selector(hook_defaultContainer));
+    swizzleClassMethod(CKContainer.class, @selector(containerWithIdentifier:),@selector(hook_containerWithIdentifier:));
+    // 处理iCloud（实例方法）
+    swizzle(CKContainer.class, @selector(accountStatusWithCompletionHandler:), @selector(hook_accountStatusWithCompletionHandler:));
+    swizzle(CKContainer.class, @selector(fetchUserRecordIDWithCompletionHandler:), @selector(hook_fetchUserRecordIDWithCompletionHandler:));
+    swizzle(CKContainer.class, @selector(requestApplicationPermission:completionHandler:), @selector(hook_requestApplicationPermission:completionHandler:));
+    // 处理CKDatabase（实例方法）
+    swizzle(CKDatabase.class, @selector(fetchRecordWithID:completionHandler:), @selector(hook_fetchRecordWithID:completionHandler:));
+    swizzle(CKDatabase.class, @selector(performQuery:inZoneWithID:completionHandler:), @selector(hook_performQuery:inZoneWithID:completionHandler:));
+    // 阻止iCloud文件同步
+    swizzle(NSFileManager.class, @selector(ubiquityIdentityToken), @selector(hook_ubiquityIdentityToken));
+    // 处理Siri（类方法需要使用 swizzleClassMethod）
+    swizzleClassMethod(INPreferences.class, @selector(requestSiriAuthorization:),@selector(hook_requestSiriAuthorization:));
+    swizzleClassMethod(INPreferences.class, @selector(siriAuthorizationStatus),@selector(hook_siriAuthorizationStatus));
+    swizzleClassMethod(INVocabulary.class, @selector(sharedVocabulary),@selector(hook_sharedVocabulary));
     swizzle(INPlayMediaIntent.class, @selector(initWithMediaItems:mediaContainer:playShuffled:playbackRepeatMode:resumePlayback:playbackQueueLocation:playbackSpeed:mediaSearch:),@selector(hook_initWithMediaItems:mediaContainer:playShuffled:playbackRepeatMode:resumePlayback:playbackQueueLocation:playbackSpeed:mediaSearch:));
 
     // 处理通知权限
@@ -207,7 +212,7 @@ bool isAppleIdentifier(NSString* identifier) {
 
 @implementation NSFileManager (hook)
 // 阻止文件令牌获取访问
-- (id)alwaysDenyUbiquityIdentityToken {
+- (id)hook_ubiquityIdentityToken {
     return nil; // 返回nil阻止文件同步
 }
 @end
@@ -254,6 +259,17 @@ bool isAppleIdentifier(NSString* identifier) {
 }
 @end
 
+
+@implementation UNUserNotificationCenter (hook)
+
+- (void)hook_getNotificationSettingsWithCompletionHandler:(void (^)(UNNotificationSettings *settings))completionHandler {
+    // 调用原始方法获取真实的 settings 对象（swizzle 后 hook_ 指向原始实现）
+    [self hook_getNotificationSettingsWithCompletionHandler:completionHandler];
+    // UNNotificationSettings 的各属性已通过 swizzle 被伪造为已授权状态，
+    // 所以直接透传即可，回调中应用读取到的 settings 属性都是伪造值
+}
+
+@end
 
 @implementation UNNotificationSettings (hook)
 
