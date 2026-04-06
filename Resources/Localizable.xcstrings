@@ -9505,6 +9505,23 @@
         }
       }
     },
+    "lc.common.calculate" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Calculate"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "计算"
+          }
+        }
+      }
+    },
     "lc.common.delete" : {
       "extractionState" : "manual",
       "localizations" : {
