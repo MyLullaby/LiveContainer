@@ -234,7 +234,7 @@ struct LCAppSettingsView: View {
                 }
             }
             
-            if #available(iOS 16.0 *) {
+            if #available(iOS 16.0, *) {
                 Section {
                     Picker(selection: $model.uiIsMultitaskModeSpecificed) {
                         Text("lc.common.default".loc).tag(MultitaskSpecified.default)
