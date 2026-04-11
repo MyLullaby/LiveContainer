@@ -591,12 +591,18 @@ uint32_t dyld_get_sdk_version(const struct mach_header* mh);
 
 - (LCOrientationLock)orientationLock {
     return (LCOrientationLock) [((NSNumber*) _info[@"LCOrientationLock"]) intValue];
-
 }
 - (void)setOrientationLock:(LCOrientationLock)orientationLock {
     _info[@"LCOrientationLock"] = [NSNumber numberWithInt:(int) orientationLock];
     [self save];
-    
+}
+
+- (MultitaskSpecified)multitaskSpecified {
+    return (LCOrientationLock) [((NSNumber*) _info[@"MultitaskSpecified"]) intValue];
+}
+- (void)setMultitaskSpecified:(MultitaskSpecified)multitaskSpecified {
+    _info[@"MultitaskSpecified"] = [NSNumber numberWithInt:(int) multitaskSpecified];
+    [self save];
 }
 
 - (UIColor*)cachedColor {

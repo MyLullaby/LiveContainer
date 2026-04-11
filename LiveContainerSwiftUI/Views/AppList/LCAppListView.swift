@@ -82,7 +82,6 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     @EnvironmentObject private var sharedAppSortManager : LCAppSortManager
     
     @AppStorage("LCMultitaskMode", store: LCUtils.appGroupUserDefault) var multitaskMode: MultitaskMode = .virtualWindow
-    @AppStorage("LCLaunchInMultitaskMode") var launchInMultitaskMode = false
     
     @State private var isViewAppeared = false
     
@@ -559,7 +558,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             
             UserDefaults.standard.setValue(urlToOpen.url!.absoluteString, forKey: "launchAppUrlScheme")
             do {
-                try await appToLaunch.runApp(multitask: launchInMultitaskMode)
+                try await appToLaunch.runApp()
             } catch {
                 errorInfo = error.localizedDescription
                 errorShow = true
@@ -751,6 +750,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             finalNewApp.fixLocalNotification = appToReplace.appInfo.fixLocalNotification
             finalNewApp.lastLaunched = appToReplace.appInfo.lastLaunched
             finalNewApp.jitLaunchScriptJs = appToReplace.appInfo.jitLaunchScriptJs
+            finalNewApp.multitaskSpecified = appToReplace.appInfo.multitaskSpecified
             finalNewApp.autoSaveDisabled = false
             finalNewApp.save()
         } else {
@@ -1031,12 +1031,8 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             return
         }
 
-        do {            
-            if #available(iOS 16.0, *), launchInMultitaskMode {
-                try await appFound.runApp(multitask: true, containerFolderName: container, forceJIT: forceJIT)
-            } else {
-                try await appFound.runApp(multitask: false, containerFolderName: container, forceJIT: forceJIT)
-            }
+        do {
+            try await appFound.runApp(multitask: nil, containerFolderName: container, forceJIT: forceJIT)
         } catch {
             errorInfo = error.localizedDescription
             errorShow = true

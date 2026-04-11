@@ -29,7 +29,6 @@ struct LCDataManagementView : View {
     @State var successInfo = ""
     
     @EnvironmentObject private var sharedModel : SharedModel
-    @AppStorage("LCLaunchInMultitaskMode") var launchInMultitaskMode = false
     
     init(appDataFolderNames: Binding<[String]>) {        
         _appDataFolderNames = appDataFolderNames
@@ -356,7 +355,7 @@ struct LCDataManagementView : View {
             do {
                 try await sharedModel.apps.first(where: { app in
                     return app.appInfo.bundleIdentifier() == "com.tigisoftware.Filza"
-                })?.runApp(multitask: launchInMultitaskMode)
+                })?.runApp()
             } catch {
                 successInfo = error.localizedDescription
                 successShow = true
