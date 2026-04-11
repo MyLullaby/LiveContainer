@@ -116,6 +116,24 @@ class LCAppModel: ObservableObject, Hashable {
         }
     }
     
+    public var bundleIdentifier: String {
+        get {
+            return appInfo.bundleIdentifier() ?? "?"
+        }
+    }
+    
+    public var version: String {
+        get {
+            return appInfo.version() ?? "?"
+        }
+    }
+    
+    public var displayName: String {
+        get {
+            return appInfo.displayName() ?? "?"
+        }
+    }
+    
     public var shouldLaunchInMultitaskMode : Bool {
         get {
             if #available(iOS 16.0, *) {

@@ -1109,13 +1109,7 @@ struct AppIconView: View {
             if isLoading && appIcon == nil {
                 LoadingIconView()
             } else if let icon = appIcon {
-                GeometryReader { g in
-                    Image(uiImage: icon)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: g.size.width*0.2667))
-                }
-
+                IconImageView(icon: icon)
             } else {
                 RoundedRectangle(cornerRadius: 16)
                 .fill(Color.gray.opacity(0.3))
