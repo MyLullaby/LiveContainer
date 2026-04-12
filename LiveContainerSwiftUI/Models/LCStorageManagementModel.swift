@@ -64,11 +64,15 @@ final class LCStorageManagementModel: ObservableObject {
     }
 
     nonisolated private static func calculateBreakdown(apps: [LCAppModel], hiddenApps: [LCAppModel]) async throws -> LCStorageBreakdown {
-        let allApps: [LCAppModel]
+        var allApps: [LCAppModel]
         if DataManager.shared.model.isHiddenAppUnlocked {
             allApps = apps + hiddenApps
         } else {
             allApps = apps
+        }
+        
+        if UserDefaults.sideStoreExist() {
+            allApps.append(LCAppModel(appInfo: BuiltInSideStoreAppInfo()))
         }
 
         // Show per-app bundle usage only when every installed app has a reliable bundle path.
@@ -88,6 +92,10 @@ final class LCStorageManagementModel: ObservableObject {
         sizesByCategory[.appBundle] = 0
         sizesByCategory[.containers] = 0
         for appItem in appItems {
+            if appItem.appModel.appInfo is BuiltInSideStoreAppInfo {
+                continue
+            }
+            
             sizesByCategory[.appBundle]! += appItem.bundleSize ?? 0
             for containerDetail in appItem.containerDetails {
                 if containerDetail.isExternalContainer {
@@ -149,7 +157,16 @@ final class LCStorageManagementModel: ObservableObject {
 
         var containersSize: Int64 = 0
         for container in input.uiContainers {
+            if container.bookmarkResolved {
+                let _ = container.containerURL.startAccessingSecurityScopedResource()
+            }
+            
             let size = try await calculateSize(at: container.containerURL)
+            
+            if container.bookmarkResolved {
+                container.containerURL.stopAccessingSecurityScopedResource()
+            }
+            
             if container.storageBookMark == nil {
                 containersSize += size
             }
@@ -170,13 +187,20 @@ final class LCStorageManagementModel: ObservableObject {
         } else {
             bundleSize = nil
         }
+        
+        let totalSize: Int64
+        if input.appInfo is BuiltInSideStoreAppInfo {
+            totalSize = containersSize
+        } else {
+            totalSize = (bundleSize ?? 0) + containersSize
+        }
 
         return LCAppStorageItem(
             id: UUID(),
             appModel: input,
             bundleSize: bundleSize,
             containersSize: containersSize,
-            totalSize: (bundleSize ?? 0) + containersSize,
+            totalSize: totalSize,
             containerDetails: containerDetails
         )
     }

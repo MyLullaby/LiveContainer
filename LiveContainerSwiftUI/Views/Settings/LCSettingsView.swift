@@ -255,6 +255,13 @@ struct LCSettingsView: View {
                 }
                     
                 Section {
+                    if sharedModel.multiLCStatus != 2 {
+                        NavigationLink {
+                            LCStorageManagementView()
+                        } label: {
+                            Text("lc.settings.storageManagement".loc)
+                        }
+                    }
                     NavigationLink {
                         LCDataManagementView(appDataFolderNames: $appDataFolderNames)
                     } label: {

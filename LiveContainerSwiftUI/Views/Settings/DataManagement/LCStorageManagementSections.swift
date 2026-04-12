@@ -325,10 +325,30 @@ private struct LCAppStorageDetailView: View {
                 LCAppStorageSummaryHeaderView(appItem: appItem)
 
                 if let bundleSize = appItem.bundleSize {
-                    appSummaryRow(title: "lc.storage.appBundle".loc, size: bundleSize)
-                }
+                    HStack(spacing: 12) {
+                        Text("lc.storage.appBundle".loc)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
 
-                appSummaryRow(title: "lc.storage.containers".loc, size: appItem.containersSize)
+                        Spacer(minLength: 12)
+
+                        Text(formatStorageSize(bundleSize))
+                            .strikethrough(appItem.appModel.appInfo is BuiltInSideStoreAppInfo)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                HStack(spacing: 12) {
+                    Text("lc.storage.containers".loc)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    Spacer(minLength: 12)
+
+                    Text(formatStorageSize(appItem.containersSize))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
 
             }
 
@@ -342,20 +362,6 @@ private struct LCAppStorageDetailView: View {
         }
         .navigationTitle(appItem.appModel.displayName)
         .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-private func appSummaryRow(title: String, size: Int64) -> some View {
-    HStack(spacing: 12) {
-        Text(title)
-            .lineLimit(1)
-            .truncationMode(.tail)
-
-        Spacer(minLength: 12)
-
-        Text(formatStorageSize(size))
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
     }
 }
 

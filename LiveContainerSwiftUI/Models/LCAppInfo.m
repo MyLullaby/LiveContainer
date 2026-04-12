@@ -9,11 +9,6 @@
 
 uint32_t dyld_get_sdk_version(const struct mach_header* mh);
 
-@interface LCAppInfo()
-@property UIImage* cachedIcon;
-@property UIImage* cachedIconDark;
-@end
-
 @implementation LCAppInfo
 
 - (instancetype)initWithBundlePath:(NSString*)bundlePath {

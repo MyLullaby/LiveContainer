@@ -29,8 +29,6 @@ typedef NS_ENUM(NSInteger, MultitaskSpecified){
 @property bool hideLiveContainer;
 @property bool dontLoadTweakLoader;
 @property bool dontInjectTweakLoader;
-@property UIColor* cachedColor;
-@property UIColor* cachedColorDark;
 @property LCOrientationLock orientationLock;
 @property MultitaskSpecified multitaskSpecified;
 @property bool fixFilePickerNew;
@@ -50,6 +48,11 @@ typedef NS_ENUM(NSInteger, MultitaskSpecified){
 #if is32BitSupported
 @property bool is32bit;
 #endif
+@property UIColor* cachedColor;
+@property UIColor* cachedColorDark;
+@property UIImage* cachedIcon;
+@property UIImage* cachedIconDark;
+
 - (void)setBundlePath:(NSString*)newBundlePath;
 - (NSMutableDictionary*)info;
 - (UIImage*)iconIsDarkIcon:(BOOL)isDarkIcon;
