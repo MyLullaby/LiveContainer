@@ -18,9 +18,7 @@ class LCContainer : ObservableObject, Hashable {
     var bookmarkResolveContinuation: UnsafeContinuation<(), Never>? = nil
     
     @Published var isolateAppGroup : Bool
-    @Published var calculatedSizeInBytes: Int64?
-    @Published var isCalculatingSize = false
-    @Published var sizeCalculationError: String?
+
     @Published var spoofIdentifierForVendor : Bool {
         didSet {
             if spoofIdentifierForVendor && spoofedIdentifier == nil {

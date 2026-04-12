@@ -94,8 +94,12 @@ struct LCStorageSummarySection: View {
         Section("lc.storage.totalStorage".loc) {
             VStack(alignment: .leading, spacing: 12) {
                 if isCalculating {
-                    ProgressView("lc.storage.calculating".loc)
-                        .controlSize(.regular)
+                    HStack {
+                        Spacer()
+                        ProgressView("lc.storage.calculating".loc)
+                            .controlSize(.regular)
+                        Spacer()
+                    }
                 }
 
                 if let breakdown {
@@ -265,13 +269,13 @@ struct LCInstalledAppsSection: View {
                             .truncationMode(.tail)
                     }
                 }
-                .layoutPriority(1)
 
-                Spacer(minLength: 12)
+                Spacer()
 
                 Text(formatStorageSize(appItem.totalSize))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .layoutPriority(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
