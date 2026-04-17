@@ -98,7 +98,7 @@ struct LCContainerView : View {
                 } footer: {
                     Text("lc.container.defaultContainerDesc".loc)
                 }
-                
+
                 Section {
                     if inUse {
                         Text("lc.container.inUse".loc)
@@ -216,8 +216,7 @@ struct LCContainerView : View {
         }
         
     }
-    
-    
+
     func saveContainer() {
         if let usingLC = LCSharedUtils.getContainerUsingLCScheme(withFolderName: container.folderName) {
             errorInfo = "lc.container.inUseBy %@".localizeWithFormat(usingLC)

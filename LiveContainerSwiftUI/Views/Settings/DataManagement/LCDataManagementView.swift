@@ -22,6 +22,7 @@ struct LCDataManagementView : View {
     @State private var folderRemoveCount = 0
     
     @StateObject private var keyChainRemovalAlert = YesNoHelper()
+    @StateObject private var tmpRemovalAlert = YesNoHelper()
     
     @State var errorShow = false
     @State var errorInfo = ""
@@ -29,7 +30,6 @@ struct LCDataManagementView : View {
     @State var successInfo = ""
     
     @EnvironmentObject private var sharedModel : SharedModel
-    @AppStorage("LCLaunchInMultitaskMode") var launchInMultitaskMode = false
     
     init(appDataFolderNames: Binding<[String]>) {        
         _appDataFolderNames = appDataFolderNames
@@ -73,6 +73,12 @@ struct LCDataManagementView : View {
                     Task { await removeKeyChain() }
                 } label: {
                     Text("lc.settings.cleanKeychain".loc)
+                }
+
+                Button(role:.destructive) {
+                    Task { await clearTemporaryFiles() }
+                } label: {
+                    Text("lc.settings.cleanTmp".loc)
                 }
             }
             
@@ -150,6 +156,19 @@ struct LCDataManagementView : View {
         } message: {
             Text("lc.settings.cleanKeychainDesc".loc)
         }
+        .alert("lc.settings.cleanTmp".loc, isPresented: $tmpRemovalAlert.show) {
+            Button(role: .destructive) {
+                tmpRemovalAlert.close(result: true)
+            } label: {
+                Text("lc.common.delete".loc)
+            }
+
+            Button("lc.common.cancel".loc, role: .cancel) {
+                tmpRemovalAlert.close(result: false)
+            }
+        } message: {
+            Text("lc.settings.cleanTmpConfirm".loc)
+        }
         .onAppear {
             onAppearFunc()
         }
@@ -223,6 +242,35 @@ struct LCDataManagementView : View {
               errorInfo = status.description
               errorShow = true
           }
+        }
+    }
+
+    func clearTemporaryFiles() async {
+        guard let result = await tmpRemovalAlert.open(), result else {
+            return
+        }
+
+        let fm = FileManager.default
+        let tmpDirectory = fm.temporaryDirectory
+
+        do {
+            let tmpItems = try fm.contentsOfDirectory(at: tmpDirectory, includingPropertiesForKeys: nil)
+
+            if tmpItems.isEmpty {
+                successInfo = "lc.settings.noTmpToClean".loc
+                successShow = true
+                return
+            }
+
+            for item in tmpItems {
+                try fm.removeItem(at: item)
+            }
+
+            successInfo = "lc.settings.cleanTmpComplete".loc
+            successShow = true
+        } catch {
+            errorInfo = error.localizedDescription
+            errorShow = true
         }
     }
     
@@ -356,7 +404,7 @@ struct LCDataManagementView : View {
             do {
                 try await sharedModel.apps.first(where: { app in
                     return app.appInfo.bundleIdentifier() == "com.tigisoftware.Filza"
-                })?.runApp(multitask: launchInMultitaskMode)
+                })?.runApp()
             } catch {
                 successInfo = error.localizedDescription
                 successShow = true
@@ -369,4 +417,5 @@ struct LCDataManagementView : View {
             app.appInfo.clearIconCache()
         }
     }
+
 }
