@@ -395,19 +395,21 @@ void* getGuestAppHeader(void) {
 #define HOOK_LOCK_1ST_ARG
 #endif
 static void *lockPtrToIgnore;
+static mach_port_t tidToIgnore;
 void hook_libdyld_os_unfair_recursive_lock_lock_with_options(HOOK_LOCK_1ST_ARG void* lock, uint32_t options) {
     if(!lockPtrToIgnore) lockPtrToIgnore = lock;
-    if(lock != lockPtrToIgnore) {
+    if(lock != lockPtrToIgnore || tidToIgnore != mach_thread_self()) {
         os_unfair_recursive_lock_lock_with_options(lock, options);
     }
 }
 void hook_libdyld_os_unfair_recursive_lock_unlock(HOOK_LOCK_1ST_ARG void* lock) {
-    if(lock != lockPtrToIgnore) {
+    if(lock != lockPtrToIgnore || tidToIgnore != mach_thread_self()) {
         os_unfair_recursive_lock_unlock(lock);
     }
 }
 
 void *dlopen_nolock(const char *path, int mode) {
+    tidToIgnore = mach_thread_self();
     const char *libdyldPath = "/usr/lib/system/libdyld.dylib";
     mach_header_u *libdyldHeader = LCGetLoadedImageHeader(0, libdyldPath);
     assert(libdyldHeader != NULL);
