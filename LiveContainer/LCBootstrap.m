@@ -479,6 +479,17 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     
     BOOL hookDlopen = !isSideStore && !isSharedBundle && LCSharedUtils.certificatePassword && isLiveProcess;
     DyldHooksInit([guestAppInfo[@"hideLiveContainer"] boolValue], hookDlopen, [guestAppInfo[@"spoofSDKVersion"] unsignedIntValue]);
+    
+    if([guestContainerInfo[@"spoofIdentifierForVendor"] boolValue]) {
+        NSString* idForVendorStr = guestContainerInfo[@"spoofedIdentifierForVendor"];
+        if([idForVendorStr isKindOfClass:NSString.class]) {
+            NSUUID* idForVendorUUID = [[NSUUID UUID] initWithUUIDString:idForVendorStr];
+            if(idForVendorUUID) {
+                IDFVHookInit(idForVendorUUID);
+            }
+        }
+    }
+    
 #if is32BitSupported
     bool is32bit = [guestAppInfo[@"is32bit"] boolValue];
     if(is32bit) {
