@@ -303,33 +303,41 @@ struct LCDataManagementView : View {
     }
 
     let fm = FileManager.default
-
-    guard let cacheDirectory = fm.urls(for: .cachesDirectory, in: .userDomainMask).first else {
-        errorInfo = "Could not find cache directory"
-        errorShow = true
-        return
-    }
+   
+    let dataPaths = [LCPath.dataPath, LCPath.lcGroupDataPath]
+    var cleanedCount = 0
 
     do {
-        let cacheItems = try fm.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: nil)
-
-        if cacheItems.isEmpty {
-            successInfo = "lc.settings.noCacheToClean".loc 
-            successShow = true
-            return
+        for rootPath in dataPaths {
+            
+            let containers = try fm.contentsOfDirectory(at: rootPath, includingPropertiesForKeys: [.isDirectoryKey])
+            
+            for containerPath in containers {
+                
+                let guestCachePath = containerPath.appendingPathComponent("Library/Caches")
+                
+                if fm.fileExists(atPath: guestCachePath.path) {
+                    let cacheItems = try fm.contentsOfDirectory(at: guestCachePath, includingPropertiesForKeys: nil)
+                    for item in cacheItems {
+                        try fm.removeItem(at: item)
+                    }
+                    cleanedCount += 1
+                }
+            }
         }
 
-        for item in cacheItems {
-            try fm.removeItem(at: item)
+        if cleanedCount == 0 {
+            successInfo = "lc.settings.noCacheToClean".loc
+        } else {
+            successInfo = "lc.settings.cleanCacheComplete %lld".localizeWithFormat(cleanedCount)
         }
-
-        successInfo = "lc.settings.cleanCacheComplete".loc
         successShow = true
     } catch {
         errorInfo = error.localizedDescription
         errorShow = true
     }
 }
+
 
     func moveDanglingFolders() async {
         let fm = FileManager()
