@@ -23,6 +23,8 @@ struct LCDataManagementView : View {
     
     @StateObject private var keyChainRemovalAlert = YesNoHelper()
     @StateObject private var tmpRemovalAlert = YesNoHelper()
+    @StateObject private var cacheRemovalAlert = YesNoHelper() 
+
     
     @State var errorShow = false
     @State var errorInfo = ""
@@ -80,6 +82,13 @@ struct LCDataManagementView : View {
                 } label: {
                     Text("lc.settings.cleanTmp".loc)
                 }
+                
+                Button(role:.destructive) {
+                    Task { await clearCacheFiles() }
+                } label: {
+                    Text("lc.settings.cleanCaches".loc) 
+                }
+
             }
             
             Section {
@@ -169,6 +178,20 @@ struct LCDataManagementView : View {
         } message: {
             Text("lc.settings.cleanTmpConfirm".loc)
         }
+        .alert("lc.settings.cleanCaches".loc, isPresented: $cacheRemovalAlert.show) {
+    Button(role: .destructive) {
+        cacheRemovalAlert.close(result: true)
+    } label: {
+        Text("lc.common.delete".loc)
+    }
+
+    Button("lc.common.cancel".loc, role: .cancel) {
+        cacheRemovalAlert.close(result: false)
+    }
+} message: {
+    Text("lc.settings.cleanCacheConfirm".loc) 
+}
+
         .onAppear {
             onAppearFunc()
         }
@@ -273,7 +296,41 @@ struct LCDataManagementView : View {
             errorShow = true
         }
     }
-    
+
+    func clearCacheFiles() async {
+    guard let result = await cacheRemovalAlert.open(), result else {
+        return
+    }
+
+    let fm = FileManager.default
+
+    guard let cacheDirectory = fm.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+        errorInfo = "Could not find cache directory"
+        errorShow = true
+        return
+    }
+
+    do {
+        let cacheItems = try fm.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: nil)
+
+        if cacheItems.isEmpty {
+            successInfo = "lc.settings.noCacheToClean".loc 
+            successShow = true
+            return
+        }
+
+        for item in cacheItems {
+            try fm.removeItem(at: item)
+        }
+
+        successInfo = "lc.settings.cleanCacheComplete".loc
+        successShow = true
+    } catch {
+        errorInfo = error.localizedDescription
+        errorShow = true
+    }
+}
+
     func moveDanglingFolders() async {
         let fm = FileManager()
         do {
