@@ -22,6 +22,8 @@ struct LCTabView: View {
     @EnvironmentObject var sceneDelegate: SceneDelegate
     @State var shouldToggleMainWindowOpen = false
     @Environment(\.scenePhase) var scenePhase
+    @StateObject var downloadHelper = DownloadHelper()
+    
     let pub = NotificationCenter.default.publisher(for: UIScene.didDisconnectNotification)
 
     
@@ -88,6 +90,8 @@ struct LCTabView: View {
                 }
             }
         }
+        .downloadAlert(helper: downloadHelper)
+        .environmentObject(downloadHelper)
         .alert("lc.common.error".loc, isPresented: $errorShow){
             Button("lc.common.ok".loc, action: {
             })
