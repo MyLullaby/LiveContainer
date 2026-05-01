@@ -298,45 +298,46 @@ struct LCDataManagementView : View {
     }
 
     func clearCacheFiles() async {
-    guard let result = await cacheRemovalAlert.open(), result else {
-        return
-    }
+        guard let result = await cacheRemovalAlert.open(), result else {
+            return
+        }
 
-    let fm = FileManager.default
-   
-    let dataPaths = [LCPath.dataPath, LCPath.lcGroupDataPath]
-    var cleanedCount = 0
+        let fm = FileManager.default
+       
+        var allApps = sharedModel.apps + sharedModel.hiddenApps
+        if UserDefaults.sideStoreExist() {
+            allApps.append(LCAppModel(appInfo: BuiltInSideStoreAppInfo()))
+        }
+        
+        var cleanedCount = 0
 
-    do {
-        for rootPath in dataPaths {
-            
-            let containers = try fm.contentsOfDirectory(at: rootPath, includingPropertiesForKeys: [.isDirectoryKey])
-            
-            for containerPath in containers {
-                
-                let guestCachePath = containerPath.appendingPathComponent("Library/Caches")
-                
-                if fm.fileExists(atPath: guestCachePath.path) {
-                    let cacheItems = try fm.contentsOfDirectory(at: guestCachePath, includingPropertiesForKeys: nil)
-                    for item in cacheItems {
-                        try fm.removeItem(at: item)
+        do {
+            for app in allApps {
+                for container in app.uiContainers {
+                    let containerPath = container.containerURL
+                    let guestCachePath = containerPath.appendingPathComponent("Library/Caches")
+                    
+                    if fm.fileExists(atPath: guestCachePath.path) {
+                        let cacheItems = try fm.contentsOfDirectory(at: guestCachePath, includingPropertiesForKeys: nil)
+                        for item in cacheItems {
+                            try fm.removeItem(at: item)
+                        }
+                        cleanedCount += 1
                     }
-                    cleanedCount += 1
                 }
             }
-        }
 
-        if cleanedCount == 0 {
-            successInfo = "lc.settings.noCacheToClean".loc
-        } else {
-            successInfo = "lc.settings.cleanCacheComplete %lld".localizeWithFormat(cleanedCount)
+            if cleanedCount == 0 {
+                successInfo = "lc.settings.noCacheToClean".loc
+            } else {
+                successInfo = "lc.settings.cleanCacheComplete".loc
+            }
+            successShow = true
+        } catch {
+            errorInfo = error.localizedDescription
+            errorShow = true
         }
-        successShow = true
-    } catch {
-        errorInfo = error.localizedDescription
-        errorShow = true
     }
-}
 
 
     func moveDanglingFolders() async {
