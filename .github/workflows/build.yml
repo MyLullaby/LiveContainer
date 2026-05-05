@@ -121,7 +121,7 @@ jobs:
         run: |
           python .github/update_json.py
       - name: Nightly Release
-        uses: andelf/nightly-release@v5834076edc55cc05975561c9722043f072ac5c26
+        uses: andelf/nightly-release@5834076edc55cc05975561c9722043f072ac5c26
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with: 
