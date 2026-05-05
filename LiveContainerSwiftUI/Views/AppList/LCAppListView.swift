@@ -58,7 +58,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     @State var webViewURL : URL = URL(string: "about:blank")!
     @StateObject private var webViewUrlInput = InputHelper()
     
-    @ObservedObject var downloadHelper = DownloadHelper()
+    @EnvironmentObject var downloadHelper: DownloadHelper
     @StateObject private var installUrlInput = InputHelper()
     
     @State private var jitLog = ""
@@ -386,7 +386,6 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                 installUrlInput.close(result: nil)
             }
         )
-        .downloadAlert(helper: downloadHelper)
         .sheet(isPresented: $jitAlert.show, onDismiss: {
             jitAlert.close(result: false)
         }) {
