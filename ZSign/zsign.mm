@@ -194,6 +194,7 @@ int checkCert(NSData *key,
         ZSignAsset* pSignAsset = new ZSignAsset();
         const char* strPKeyFileData = (const char*)[key bytes];
         const char* strPassword = [pass cStringUsingEncoding:NSUTF8StringEncoding];
+        string strBundleId(bundleId.UTF8String);
 
         bool ret = pSignAsset->InitSimple(strPKeyFileData, (int)[key length], nil, 0, strPassword);
         if (!ret) {
@@ -222,7 +223,6 @@ int checkCert(NSData *key,
                     ZLog::ErrorV(">>> Invalid mach-o file! %s\n", machoPath.UTF8String);
                     errorMsg = [NSString stringWithFormat:@"Invalid mach-o file! %@", machoPath];
                 } else {
-                    string strBundleId(bundleId.UTF8String);
                     bool bRet = macho->Sign(pSignAsset, true, strBundleId, "", "", "");
                     if (!bRet) {
                         errorMsg = [NSString stringWithFormat:@"Failed to Sign %@", machoPath];

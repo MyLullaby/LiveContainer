@@ -15,7 +15,7 @@ ZMachO::ZMachO()
 
 ZMachO::~ZMachO()
 {
-	FreeArchOes();
+    Free();
 }
 
 bool ZMachO::Init(const char* szFile)
