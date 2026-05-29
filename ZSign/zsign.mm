@@ -261,7 +261,7 @@ int checkCert(NSData *key,
 + (NSProgress*)signWithAppPath:(NSString *)appPath bundleId:(NSString *)bundleId cert:(NSData *)key pass:(NSString *)pass
              completionHandler:(void (^)(BOOL success, NSError *error))completionHandler {
 
-    NSURL* bundleURL = [NSURL URLWithString:appPath];
+    NSURL* bundleURL = [NSURL fileURLWithPath:appPath];
         
     NSFileManager *fm = [NSFileManager defaultManager];
     NSDirectoryEnumerator *enumerator = [fm enumeratorAtURL:bundleURL includingPropertiesForKeys:@[NSURLIsRegularFileKey] options:NSDirectoryEnumerationSkipsHiddenFiles errorHandler:nil];

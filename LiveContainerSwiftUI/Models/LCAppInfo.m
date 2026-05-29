@@ -383,21 +383,10 @@ uint32_t dyld_get_sdk_version(const struct mach_header* mh);
         return;
     }
     
-    if(forceSign) {
-        // remove ZSign cache since hash is changed after upgrading patch
-        NSString* cachePath = [appPath stringByAppendingPathComponent:@"zsign_cache.json"];
-        if([fm fileExistsAtPath:cachePath]) {
-            NSError* err;
-            [fm removeItemAtPath:cachePath error:&err];
-        }
-    }
-    
     // Sign app if JIT-less is set up
         NSURL *appPathURL = [NSURL fileURLWithPath:appPath];
             void (^signCompletionHandler)(BOOL success, NSError *error)  = ^(BOOL success, NSError *_Nullable error) {
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    // Save sign ID and restore bundle ID
-                    [self save];
                     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"SigningInProgress"];
                     if(!success) {
                         completetionHandler(NO, error.localizedDescription);

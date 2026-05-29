@@ -52,6 +52,10 @@ extension LCUtils {
             filesToSign.append(fileURL)
         }
         
+        if filesToSign.isEmpty {
+            return
+        }
+        
         for fileURL in filesToSign {
             LCPatchAppBundleFixupARM64eSlice(fileURL)
         }
