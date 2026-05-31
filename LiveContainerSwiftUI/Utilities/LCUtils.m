@@ -245,7 +245,7 @@
     
     // Sign the test app bundle
 
-    [LCUtils signFilesWithZSignWithURLs:@[[NSURL fileURLWithPath:path]]
+    [LCUtils signFilesWithZSignWithURLs:@[[NSURL fileURLWithPath:tmpLibPath]]
                   completionHandler:^(BOOL success, NSError *_Nullable error) {
         signSuccess = success;
         signError = error;
@@ -262,6 +262,7 @@
         } else {
             completionHandler(NO, [NSError errorWithDomain:NSBundle.mainBundle.bundleIdentifier code:2 userInfo:@{NSLocalizedDescriptionKey: @"lc.signer.latestCertificateInvalidErr"}]);
         }
+        [NSFileManager.defaultManager removeItemAtPath:tmpLibPath error:nil];
     });
 }
 

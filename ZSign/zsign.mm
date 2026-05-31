@@ -242,17 +242,18 @@ int checkCert(NSData *key,
             });
         }
 
-        dispatch_group_notify(group, dispatch_get_main_queue(), ^{
-            delete pSignAsset;
-            if (errorList.count > 0) {
-                NSError* signingError = [NSError errorWithDomain:@"Failed to Sign" code:-1 userInfo:@{
-                    NSLocalizedDescriptionKey: [errorList componentsJoinedByString:@"\n"]
-                }];
-                completionHandler(NO, signingError);
-            } else {
-                completionHandler(YES, nil);
-            }
-        });
+        dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
+
+        delete pSignAsset;
+        if (errorList.count > 0) {
+            NSError* signingError = [NSError errorWithDomain:@"Failed to Sign" code:-1 userInfo:@{
+                NSLocalizedDescriptionKey: [errorList componentsJoinedByString:@"\n"]
+            }];
+            completionHandler(NO, signingError);
+        } else {
+            completionHandler(YES, nil);
+        }
+
     });
 
     return progress;
