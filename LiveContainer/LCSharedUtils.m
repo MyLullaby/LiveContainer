@@ -274,9 +274,7 @@ extern NSBundle *lcMainBundle;
         @"auditToken57": @(val57)
     };
     
-    if(!NSUserDefaults.isLiveProcess) {
-        info[lc] = @(val57);
-    }
+    info[lc] = @(val57);
 
     [info writeBinToFile:infoPath.path atomically:YES];
 }
