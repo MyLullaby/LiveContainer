@@ -385,7 +385,39 @@ extern NSBundle *lcMainBundle;
     NSDictionary* infoDict = [NSDictionary dictionaryWithContentsOfFile:bundleInfoPath];
     return infoDict[@"LCDataUUID"];
 }
+
++ (NSArray<NSString*>*)lcUnorderedUrlSchemes {
+    NSArray<NSString *> *defaultSchemes = @[@"livecontainer", @"livecontainer2", @"livecontainer3"];
+    return defaultSchemes;
+}
+
 + (NSArray<NSString*>*)lcUrlSchemes {
-    return @[@"livecontainer", @"livecontainer2", @"livecontainer3"];
+    NSArray<NSString *> *defaultSchemes = [self lcUnorderedUrlSchemes];
+    NSSet<NSString *> *allowedSchemes = [NSSet setWithArray:defaultSchemes];
+    NSMutableArray<NSString *> *result = [NSMutableArray array];
+
+    id savedValue = [NSUserDefaults.lcSharedDefaults objectForKey:@"LCMultiLaunchPriority"];
+    if([savedValue isKindOfClass:NSArray.class]) {
+        for(id value in (NSArray *)savedValue) {
+            if(![value isKindOfClass:NSString.class]) {
+                continue;
+            }
+
+            NSString *scheme = [(NSString *)value lowercaseString];
+            if(![allowedSchemes containsObject:scheme] || [result containsObject:scheme]) {
+                continue;
+            }
+
+            [result addObject:scheme];
+        }
+    }
+
+    for(NSString *scheme in defaultSchemes) {
+        if(![result containsObject:scheme]) {
+            [result addObject:scheme];
+        }
+    }
+
+    return result;
 }
 @end

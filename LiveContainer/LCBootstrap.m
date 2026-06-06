@@ -38,6 +38,9 @@ bool sideStoreExist = false;
     return lcUserDefaults;
 }
 + (instancetype)lcSharedDefaults {
+    if(!lcUserDefaults) {
+        lcSharedDefaults = [[NSUserDefaults alloc] initWithSuiteName: [LCSharedUtils appGroupID]];
+    }
     return lcSharedDefaults;
 }
 + (NSString *)lcAppGroupPath {

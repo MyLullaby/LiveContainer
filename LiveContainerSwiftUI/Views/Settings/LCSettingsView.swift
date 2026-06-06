@@ -132,7 +132,7 @@ struct LCSettingsView: View {
                             LCMultiLCManagementView()
                         } label: {
                             if sharedModel.multiLCStatus == 0 {
-                                Text("lc.settings.multiLCInstall".loc)
+                                Text("lc.settings.multiLC".loc)
                             } else if sharedModel.multiLCStatus == 2 {
                                 Text("lc.settings.multiLCIsSecond".loc)
                             }
