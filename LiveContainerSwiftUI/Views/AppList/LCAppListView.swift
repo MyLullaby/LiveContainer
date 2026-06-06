@@ -556,9 +556,8 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                 }
             }
             
-            UserDefaults.standard.setValue(urlToOpen.url!.absoluteString, forKey: "launchAppUrlScheme")
             do {
-                try await appToLaunch.runApp()
+                try await appToLaunch.runApp(urlStr: urlToOpen.url!.absoluteString)
             } catch {
                 errorInfo = error.localizedDescription
                 errorShow = true

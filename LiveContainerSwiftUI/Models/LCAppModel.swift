@@ -199,7 +199,7 @@ class LCAppModel: ObservableObject, Hashable {
     }
     
     // You should let LCAppModel.runApp to decide whether to run in multitask mode, but you may override the multitask parameter if necessary
-    func runApp(multitask: Bool? = nil, containerFolderName : String? = nil, bundleIdOverride : String? = nil, forceJIT: Bool? = nil) async throws{
+    func runApp(multitask: Bool? = nil, containerFolderName : String? = nil, bundleIdOverride : String? = nil, urlStr : String? = nil, forceJIT: Bool? = nil) async throws{
         if isAppRunning {
             return
         }
@@ -241,9 +241,16 @@ class LCAppModel: ObservableObject, Hashable {
         {
             runningLC = (runningLC as NSString).deletingPathExtension
             
-            let openURL = URL(string: "\(runningLC)://")!
-            if await UIApplication.shared.canOpenURL(openURL) {
-                await UIApplication.shared.open(openURL)
+            var openURLComp = URLComponents()
+            openURLComp.scheme = runningLC
+            if let urlStr {
+                openURLComp.host = "open-url"
+                openURLComp.queryItems = [
+                    URLQueryItem(name: "url", value: Data(urlStr.utf8).base64EncodedString())
+                ]
+            }
+            if await UIApplication.shared.canOpenURL(openURLComp.url!) {
+                await UIApplication.shared.open(openURLComp.url!)
                 return
             }
         }
@@ -262,12 +269,14 @@ class LCAppModel: ObservableObject, Hashable {
                     shouldBreak = true
                 }
                 if let freeScheme {
+                    LCUtils.appGroupUserDefault.set(freeScheme, forKey: "LCLaunchExtensionScheme")
                     LCUtils.appGroupUserDefault.set(self.appInfo.relativeBundlePath, forKey: "LCLaunchExtensionBundleID")
                     LCUtils.appGroupUserDefault.set(uiSelectedContainer?.folderName, forKey: "LCLaunchExtensionContainerName")
+                    LCUtils.appGroupUserDefault.set(urlStr, forKey: "LCLaunchExtensionLaunchURL")
                     LCUtils.appGroupUserDefault.set(Date.now, forKey: "LCLaunchExtensionLaunchDate")
                     var launchURLComp = URLComponents()
                     launchURLComp.scheme = freeScheme
-                    launchURLComp.path = "livecontainer-launch"
+                    launchURLComp.host = "livecontainer-launch"
                     var queryItems: [URLQueryItem] = []
                     if let bundlePath = self.appInfo.relativeBundlePath {
                         queryItems.append(URLQueryItem(name: "bundle-name", value: bundlePath))
@@ -307,7 +316,7 @@ class LCAppModel: ObservableObject, Hashable {
         } else {
             UserDefaults.standard.set(self.appInfo.relativeBundlePath, forKey: "selected")
         }
-        
+        UserDefaults.standard.setValue(urlStr, forKey: "launchAppUrlScheme")
 
         UserDefaults.standard.set(uiSelectedContainer?.folderName, forKey: "selectedContainer")
         var is32bit = false

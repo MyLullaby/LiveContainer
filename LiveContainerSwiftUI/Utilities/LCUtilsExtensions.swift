@@ -333,7 +333,7 @@ extension LCUtils {
                 }
                 
                 let launchURL = URL(string: "\(freeScheme)://open-url?url=\(encodedStr)")!
-                
+                LCUtils.appGroupUserDefault.set(freeScheme, forKey: "LCLaunchExtensionScheme")
                 LCUtils.appGroupUserDefault.set(appToLaunch.appInfo.relativeBundlePath, forKey: "LCLaunchExtensionBundleID")
                 LCUtils.appGroupUserDefault.set(Date.now, forKey: "LCLaunchExtensionLaunchDate")
                 onServerMessage?("JIT acquisition will continue in another LiveContainer.")
@@ -394,7 +394,7 @@ extension LCUtils {
                 }
                 
                 launchURL = URL(string: "\(freeScheme)://open-url?url=\(encodedStr)")!
-                
+                LCUtils.appGroupUserDefault.set(freeScheme, forKey: "LCLaunchExtensionScheme")
                 LCUtils.appGroupUserDefault.set(appToLaunch.appInfo.relativeBundlePath, forKey: "LCLaunchExtensionBundleID")
                 LCUtils.appGroupUserDefault.set(Date.now, forKey: "LCLaunchExtensionLaunchDate")
                 onServerMessage?("JIT acquisition will continue in another LiveContainer.")

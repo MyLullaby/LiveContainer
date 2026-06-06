@@ -473,12 +473,11 @@ struct LCDataManagementView : View {
     
     func openInFilza(path: URL) {
         let launchURLStr = "filza://view\(path.path)/."
-        UserDefaults.standard.setValue(launchURLStr, forKey: "launchAppUrlScheme")
         Task {
             do {
                 try await sharedModel.apps.first(where: { app in
                     return app.appInfo.bundleIdentifier() == "com.tigisoftware.Filza"
-                })?.runApp()
+                })?.runApp(urlStr: launchURLStr)
             } catch {
                 successInfo = error.localizedDescription
                 successShow = true

@@ -102,6 +102,7 @@ struct LaunchAppExtension: AppIntent {
         }
         
         if normalizedLaunchScheme == "sidestore" {
+            lcSharedDefaults.set("livecontainer", forKey: "LCLaunchExtensionScheme")
             lcSharedDefaults.set("builtinSideStore", forKey: "LCLaunchExtensionBundleID")
             lcSharedDefaults.set(Date.now, forKey: "LCLaunchExtensionLaunchDate")
             try await openURL(url: launchURL)
@@ -209,6 +210,7 @@ struct LaunchAppExtension: AppIntent {
         }
         
         if newLaunch && !forceJIT && !isHiden && !isLocked && !isJITNeeded {
+            lcSharedDefaults.set(schemeToLaunch, forKey: "LCLaunchExtensionScheme")
             lcSharedDefaults.set(bundleId, forKey: "LCLaunchExtensionBundleID")
             lcSharedDefaults.set(containerName, forKey: "LCLaunchExtensionContainerName")
             lcSharedDefaults.set(Date.now, forKey: "LCLaunchExtensionLaunchDate")

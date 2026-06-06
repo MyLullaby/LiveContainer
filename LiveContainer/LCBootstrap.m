@@ -622,21 +622,29 @@ int LiveContainerMain(int argc, char *argv[]) {
 
     NSString *selectedApp = [lcUserDefaults stringForKey:@"selected"];
     NSString *selectedContainer = [lcUserDefaults stringForKey:@"selectedContainer"];
-    if(!selectedApp) {
-        NSString* selectedAppFromLaunchExtension = [lcSharedDefaults stringForKey:@"LCLaunchExtensionBundleID"];
-        
-        if(selectedAppFromLaunchExtension) {
-            NSDate* launchDate = [lcSharedDefaults objectForKey:@"LCLaunchExtensionLaunchDate"];
-            NSTimeInterval secondsSinceDate = [launchDate timeIntervalSinceNow];
-
-            if (secondsSinceDate < 0 && secondsSinceDate >= -3.0) {
-                selectedApp = selectedAppFromLaunchExtension;
-                selectedContainer = [lcSharedDefaults stringForKey:@"LCLaunchExtensionContainerName"];
-            }
-            [lcSharedDefaults removeObjectForKey:@"LCLaunchExtensionBundleID"];
-            [lcSharedDefaults removeObjectForKey:@"LCLaunchExtensionContainerName"];
+    NSString *launchUrl = nil;
+    do {
+        if(selectedApp) {
+            launchUrl = [lcUserDefaults stringForKey:@"launchAppUrlScheme"];
+            break;
         }
-    }
+        // check launch task in shared defaults
+        NSString* scheemFromLaunchExtension = [lcSharedDefaults stringForKey:@"LCLaunchExtensionScheme"];
+        if(![scheemFromLaunchExtension isEqualToString:lcAppUrlScheme]) break;
+        NSString* selectedAppFromLaunchExtension = [lcSharedDefaults stringForKey:@"LCLaunchExtensionBundleID"];
+        if(!selectedAppFromLaunchExtension) break;
+        NSDate* launchDate = [lcSharedDefaults objectForKey:@"LCLaunchExtensionLaunchDate"];
+        NSTimeInterval secondsSinceDate = [launchDate timeIntervalSinceNow];
+        if (secondsSinceDate >= 0 || secondsSinceDate < -3.0) break;
+        
+        selectedApp = selectedAppFromLaunchExtension;
+        selectedContainer = [lcSharedDefaults stringForKey:@"LCLaunchExtensionContainerName"];
+        launchUrl = [lcSharedDefaults stringForKey:@"LCLaunchExtensionLaunchURL"];
+        
+        [lcSharedDefaults removeObjectForKey:@"LCLaunchExtensionBundleID"];
+        if (selectedContainer) [lcSharedDefaults removeObjectForKey:@"LCLaunchExtensionContainerName"];
+        if (launchUrl) [lcSharedDefaults removeObjectForKey:@"LCLaunchExtensionLaunchURL"];
+    } while (0);
     
     NSString* lastLaunchDataUUID;
     if(!isLiveProcess) {
@@ -739,8 +747,6 @@ int LiveContainerMain(int argc, char *argv[]) {
     }
     
     if (selectedApp || isSideStore) {
-        
-        NSString *launchUrl = [lcUserDefaults stringForKey:@"launchAppUrlScheme"];
         [lcUserDefaults removeObjectForKey:@"selected"];
         [lcUserDefaults removeObjectForKey:@"selectedContainer"];
         if(launchUrl) {
