@@ -272,7 +272,9 @@ class LCAppModel: ObservableObject, Hashable {
                     LCUtils.appGroupUserDefault.set(freeScheme, forKey: "LCLaunchExtensionScheme")
                     LCUtils.appGroupUserDefault.set(self.appInfo.relativeBundlePath, forKey: "LCLaunchExtensionBundleID")
                     LCUtils.appGroupUserDefault.set(uiSelectedContainer?.folderName, forKey: "LCLaunchExtensionContainerName")
-                    LCUtils.appGroupUserDefault.set(urlStr, forKey: "LCLaunchExtensionLaunchURL")
+                    if let urlStr {
+                        LCUtils.appGroupUserDefault.set(urlStr, forKey: "LCLaunchExtensionLaunchURL")
+                    }
                     LCUtils.appGroupUserDefault.set(Date.now, forKey: "LCLaunchExtensionLaunchDate")
                     var launchURLComp = URLComponents()
                     launchURLComp.scheme = freeScheme
@@ -316,8 +318,9 @@ class LCAppModel: ObservableObject, Hashable {
         } else {
             UserDefaults.standard.set(self.appInfo.relativeBundlePath, forKey: "selected")
         }
-        UserDefaults.standard.setValue(urlStr, forKey: "launchAppUrlScheme")
-
+        if let urlStr {
+            UserDefaults.standard.setValue(urlStr, forKey: "launchAppUrlScheme")
+        }
         UserDefaults.standard.set(uiSelectedContainer?.folderName, forKey: "selectedContainer")
         var is32bit = false
         

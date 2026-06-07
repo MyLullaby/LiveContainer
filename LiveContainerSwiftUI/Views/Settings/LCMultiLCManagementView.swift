@@ -211,8 +211,7 @@ struct LCMultiLCManagementView : View, InstallAnotherLCButtonDelegate {
             
             if(result == 2) {
                 let launchURLStr = packedIpaUrl.absoluteString
-                UserDefaults.standard.setValue(launchURLStr, forKey: "launchAppUrlScheme")
-                LCUtils.openSideStore()
+                LCUtils.openSideStore(urlStr: launchURLStr)
                 return
             }
             

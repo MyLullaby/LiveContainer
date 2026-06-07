@@ -507,11 +507,11 @@ extension LCUtils {
         }
     }
     
-    static func openSideStore(delegate: LCAppModelDelegate? = nil) {
+    static func openSideStore(delegate: LCAppModelDelegate? = nil, urlStr: String? = nil) {
         let sideStoreApp = LCAppModel(appInfo: BuiltInSideStoreAppInfo(), delegate: delegate)
         
         Task {
-            try await sideStoreApp.runApp(bundleIdOverride: "builtinSideStore")
+            try await sideStoreApp.runApp(bundleIdOverride: "builtinSideStore", urlStr: urlStr)
         }
     }
 }
