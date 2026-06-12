@@ -113,17 +113,33 @@ void overwriteMainCFBundle(void) {
     // Overwrite CFBundleGetMainBundle
     uint32_t *pc = (uint32_t *)CFBundleGetMainBundle;
     void **mainBundleAddr = 0;
-    while (true) {
-        uint64_t addr = aarch64_get_tbnz_jump_address(*pc, (uint64_t)pc);
-        if (addr) {
-            // adrp <- pc-1
-            // tbnz <- pc
-            // ...
-            // ldr  <- addr
-            mainBundleAddr = (void **)aarch64_emulate_adrp_ldr(*(pc-1), *(uint32_t *)addr, (uint64_t)(pc-1));
-            break;
+    
+    if(@available(iOS 27.0, *)) {
+        // at least in iOS 27.0 db1, the logic is inversed and the __mainBundle is right after the first tbz instruction
+        while (true) {
+            bool isTbz = ((*pc) & 0x7F000000) == 0x36000000;
+            if (isTbz) {
+                // adrp <- pc-1
+                // tbz <- pc
+                // ldr  <- addr
+                mainBundleAddr = (void **)aarch64_emulate_adrp_ldr(*(pc-1), *(uint32_t *)(pc+1), (uint64_t)(pc-1));
+                break;
+            }
+            ++pc;
         }
-        ++pc;
+    } else {
+        while (true) {
+            uint64_t addr = aarch64_get_tbnz_jump_address(*pc, (uint64_t)pc);
+            if (addr) {
+                // adrp <- pc-1
+                // tbnz <- pc
+                // ...
+                // ldr  <- addr
+                mainBundleAddr = (void **)aarch64_emulate_adrp_ldr(*(pc-1), *(uint32_t *)addr, (uint64_t)(pc-1));
+                break;
+            }
+            ++pc;
+        }
     }
     assert(mainBundleAddr != NULL);
     *mainBundleAddr = (__bridge void *)NSBundle.mainBundle._cfBundle;
