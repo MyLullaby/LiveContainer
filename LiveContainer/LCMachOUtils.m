@@ -386,6 +386,9 @@ void *getDyldBase(void) {
             uintptr_t addrValue = addr.unsignedLongLongValue;
             if(addrValue < (uintptr_t)dyldBase || addrValue >= (uintptr_t)dyldBase + textSize) {
                 dyldSimBase = (void *)(addrValue & ~PAGE_MASK);
+                while (((mach_header_u *)dyldSimBase)->magic != MH_MAGIC_64) {
+                    dyldSimBase -= PAGE_SIZE;
+                }
                 break;
             }
         }

@@ -114,6 +114,7 @@ void overwriteMainCFBundle(void) {
     uint32_t *pc = (uint32_t *)CFBundleGetMainBundle;
     void **mainBundleAddr = 0;
     
+#if !TARGET_OS_SIMULATOR
     if(@available(iOS 27.0, *)) {
         // at least in iOS 27.0 db1, the logic is inversed and the __mainBundle is right after the first tbz instruction
         while (true) {
@@ -128,6 +129,7 @@ void overwriteMainCFBundle(void) {
             ++pc;
         }
     } else {
+#endif
         while (true) {
             uint64_t addr = aarch64_get_tbnz_jump_address(*pc, (uint64_t)pc);
             if (addr) {
@@ -140,7 +142,9 @@ void overwriteMainCFBundle(void) {
             }
             ++pc;
         }
+#if !TARGET_OS_SIMULATOR
     }
+#endif
     assert(mainBundleAddr != NULL);
     *mainBundleAddr = (__bridge void *)NSBundle.mainBundle._cfBundle;
 }
