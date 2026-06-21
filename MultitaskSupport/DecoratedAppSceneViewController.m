@@ -33,18 +33,18 @@ void UIKitFixesInit(void) {
 @implementation DecoratedAppSceneViewController
 - (instancetype)initWindowName:(NSString*)windowName bundleId:(NSString*)bundleId dataUUID:(NSString*)dataUUID rootVC:(UIViewController*)rootVC {
     self = [super initWithNibName:nil bundle:nil];
+    self.view = [[UIStackView alloc] initWithFrame:self.view.frame];
+    [MultitaskDockManager.shared.windowHostingView addSubview:self.view];
+    [rootVC addChildViewController:self];
+    
+    _dataUUID = dataUUID;
+    _windowName = windowName;
     _scaleRatio = 1.0;
     _isMaximized = [NSUserDefaults.lcUserDefaults boolForKey:@"LCLaunchMultitaskMaximized"];
-    [rootVC addChildViewController:self];
-    [MultitaskDockManager.shared.windowHostingView addSubview:self.view];
     _appSceneVC = [[AppSceneViewController alloc] initWithBundleId:bundleId dataUUID:dataUUID delegate:self];
     [self setupDecoratedView];
     
     [MultitaskDockManager.shared addRunningApp:windowName appUUID:dataUUID view:self.view];
-    
-    self.dataUUID = dataUUID;
-    self.windowName = windowName;
-    self.navigationItem.title = windowName;
     
     NSArray *menuItems = @[
         [UIAction actionWithTitle:@"lc.multitask.copyPid".loc image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(UIAction * _Nonnull action) {
@@ -109,14 +109,15 @@ void UIKitFixesInit(void) {
 
 - (void)setupDecoratedView {
     CGFloat navBarHeight = 44;
-    self.view = [UIStackView new];
-    BOOL isLandscape = UIInterfaceOrientationIsLandscape(UIApplication.sharedApplication.statusBarOrientation);
+    BOOL isLandscape = UIInterfaceOrientationIsLandscape(UIApp.statusBarOrientation);
     CGRect frame = CGRectMake(0, 0, isLandscape ? 480 : 320, (isLandscape ? 320 : 480) + navBarHeight);
     CGPoint rootViewCenter = self.view.superview.center;
     frame.origin = CGPointMake(rootViewCenter.x - frame.size.width / 2, rootViewCenter.y - frame.size.height / 2);
     
     if(_isMaximized) {
-        [self updateMaximizedFrameWithSettings:self.appSceneVC.settings];
+        [self.appSceneVC updateSettingsWithBlock:^(UIMutableApplicationSceneSettings *settings) {
+            [self updateMaximizedFrameWithSettings:settings];
+        }];
         CGRect maxFrame = UIEdgeInsetsInsetRect(self.view.window.frame, self.view.window.safeAreaInsets);
         // save origin as normalized coordinates
         frame.origin.x /= maxFrame.size.width;
@@ -129,7 +130,7 @@ void UIKitFixesInit(void) {
     // Navigation bar
     UINavigationBar *navigationBar = [[UINavigationBar alloc] initWithFrame:CGRectMake(0, 0, self.view.frame.size.width, navBarHeight)];
     navigationBar.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-    UINavigationItem *navigationItem = [[UINavigationItem alloc] initWithTitle:@"Unnamed window"];
+    UINavigationItem *navigationItem = [[UINavigationItem alloc] initWithTitle:self.windowName];
     navigationBar.items = @[navigationItem];
     
     self.view.axis = UILayoutConstraintAxisVertical;
@@ -240,7 +241,7 @@ void UIKitFixesInit(void) {
     self.appSceneVC.contentView.layer.sublayerTransform = CATransform3DMakeScale(_scaleRatio, _scaleRatio, 1.0);
     __weak typeof(self) weakSelf = self;
     [self.appSceneVC updateFrameWithSettingsBlock:^(UIMutableApplicationSceneSettings *settings) {
-        if(_isMaximized) {
+        if(weakSelf.isMaximized) {
             [weakSelf updateMaximizedSafeAreaWithSettings:settings];
         } else {
             // it seems some apps don't honor these settings so we don't cover the top of the app
@@ -295,7 +296,7 @@ void UIKitFixesInit(void) {
             self.view.frame = newFrame;
             self.view.layer.borderWidth = 1;
             self.resizeHandle.alpha = 1;
-            [self.appSceneVC.presenter.scene updateSettingsWithBlock:^(UIMutableApplicationSceneSettings *settings) {
+            [self.appSceneVC updateSettingsWithBlock:^(UIMutableApplicationSceneSettings *settings) {
                 [self updateWindowedFrameWithSettings:settings];
             }];
         } completion:^(BOOL finished) {
@@ -312,7 +313,7 @@ void UIKitFixesInit(void) {
             
             self.view.layer.borderWidth = 0;
             self.resizeHandle.alpha = 0;
-            [self.appSceneVC.presenter.scene updateSettingsWithBlock:^(UIMutableApplicationSceneSettings *settings) {
+            [self.appSceneVC updateSettingsWithBlock:^(UIMutableApplicationSceneSettings *settings) {
                 [self updateMaximizedFrameWithSettings:settings];
             }];
         } completion:^(BOOL finished) {
@@ -373,26 +374,25 @@ void UIKitFixesInit(void) {
 }
 
 - (void)appSceneVC:(AppSceneViewController*)vc didUpdateFromSettings:(UIMutableApplicationSceneSettings *)baseSettings transitionContext:(id)newContext {
-    UIMutableApplicationSceneSettings *newSettings = [vc.presenter.scene.settings mutableCopy];
-    newSettings.userInterfaceStyle = baseSettings.userInterfaceStyle;
-    newSettings.interfaceOrientation = baseSettings.interfaceOrientation;
-    newSettings.deviceOrientation = baseSettings.deviceOrientation;
-    newSettings.foreground = YES;
-    
-    if(self.isMaximized) {
-        [self updateMaximizedFrameWithSettings:newSettings];
-    } else {
-        [self updateWindowedFrameWithSettings:newSettings];
-    }
-    CGRect newFrame = CGRectMake(0, 0, self.view.frame.size.width/self.scaleRatio, (self.view.frame.size.height - self.navigationBar.frame.size.height)/self.scaleRatio);
-    
-    if(UIInterfaceOrientationIsLandscape(baseSettings.interfaceOrientation)) {
-        newSettings.frame = CGRectMake(0, 0, newFrame.size.height, newFrame.size.width);
-    } else {
-        newSettings.frame = CGRectMake(0, 0, newFrame.size.width, newFrame.size.height);
-    }
-    
-    [_appSceneVC.presenter.scene updateSettings:newSettings withTransitionContext:newContext completion:nil];
+    [self.appSceneVC updateSettingsWithBlock:^(UIMutableApplicationSceneSettings *settings) {
+        settings.userInterfaceStyle = baseSettings.userInterfaceStyle;
+        settings.interfaceOrientation = baseSettings.interfaceOrientation;
+        settings.deviceOrientation = baseSettings.deviceOrientation;
+        settings.foreground = YES;
+        
+        if(self.isMaximized) {
+            [self updateMaximizedFrameWithSettings:settings];
+        } else {
+            [self updateWindowedFrameWithSettings:settings];
+        }
+        CGRect newFrame = CGRectMake(0, 0, self.view.frame.size.width/self.scaleRatio, (self.view.frame.size.height - self.navigationBar.frame.size.height)/self.scaleRatio);
+        
+        if(UIInterfaceOrientationIsLandscape(baseSettings.interfaceOrientation)) {
+            settings.frame = CGRectMake(0, 0, newFrame.size.height, newFrame.size.width);
+        } else {
+            settings.frame = CGRectMake(0, 0, newFrame.size.width, newFrame.size.height);
+        }
+    }];
 }
 
 - (void)adjustNavigationBarButtonSpacingWithNegativeSpacing:(CGFloat)spacing rightMargin:(CGFloat)margin {
@@ -430,7 +430,7 @@ void UIKitFixesInit(void) {
 
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
     if(_isMaximized) {
-        [self.appSceneVC.presenter.scene updateSettingsWithBlock:^(UIMutableApplicationSceneSettings *settings) {
+        [self.appSceneVC updateSettingsWithBlock:^(UIMutableApplicationSceneSettings *settings) {
             [self updateMaximizedFrameWithSettings:settings];
         }];
     }
@@ -531,7 +531,7 @@ void UIKitFixesInit(void) {
     // scale peripheryInsets to match the scale ratio
     settings.peripheryInsets = UIEdgeInsetsMake(settings.peripheryInsets.top/_scaleRatio, settings.peripheryInsets.left/_scaleRatio, settings.peripheryInsets.bottom/_scaleRatio, settings.peripheryInsets.right/_scaleRatio);
     if(UIDevice.currentDevice.userInterfaceIdiom != UIUserInterfaceIdiomPad) {
-        UIInterfaceOrientation currentOrientation = UIApplication.sharedApplication.statusBarOrientation;
+        UIInterfaceOrientation currentOrientation = UIApp.statusBarOrientation;
         if(UIInterfaceOrientationIsLandscape(currentOrientation)) {
             safeAreaInsets.top = 0;
         }

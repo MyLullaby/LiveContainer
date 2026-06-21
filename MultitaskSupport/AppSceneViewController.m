@@ -21,7 +21,6 @@
 @end
 
 @interface AppSceneViewController()
-@property(nonatomic) API_AVAILABLE(ios(17.0)) _UISceneHostingController *hostingController;
 @property(nonatomic) UIWindowScene *hostScene;
 @property(nonatomic) NSString *sceneID;
 @property(nonatomic) NSExtension* extension;
@@ -33,12 +32,13 @@
 
 - (instancetype)initWithBundleId:(NSString*)bundleId dataUUID:(NSString*)dataUUID delegate:(id<AppSceneViewControllerDelegate>)delegate {
     self = [super initWithNibName:nil bundle:nil];
-    self.view = [[UIView alloc] init];
     self.delegate = delegate;
     self.dataUUID = dataUUID;
     self.bundleId = bundleId;
     self.scaleRatio = 1.0;
     self.isAppTerminationCleanUpCalled = false;
+    self.isNativeWindow = [NSUserDefaults.lcSharedDefaults integerForKey:@"LCMultitaskMode" ] == 1;
+    
     // init extension
     NSError* error = nil;
     _extension = [NSExtension extensionWithIdentifier:LCUtils.liveProcessBundleIdentifier error:&error];
@@ -108,10 +108,6 @@
         }
     }];
     
-    
-
-    _isNativeWindow = [NSUserDefaults.lcSharedDefaults integerForKey:@"LCMultitaskMode" ] == 1;
-
     return self;
 }
 
@@ -148,8 +144,6 @@
         settings.statusBarDisabled = !self.isNativeWindow;
         //settings.previewMaximumSize =
         //settings.deviceOrientationEventsEnabled = YES;
-        
-        self.settings = settings;
     };
     void (^updateSceneClientSettings)(id) = ^void(UIMutableApplicationSceneClientSettings *clientSettings) {
         clientSettings.interfaceOrientation = UIInterfaceOrientationPortrait;
@@ -172,6 +166,15 @@
             [parameters updateSettingsWithBlock:updateSceneSettings];
             [parameters updateClientSettingsWithBlock:updateSceneClientSettings];
         }];
+        
+        self.contentView = self.hostingController.sceneViewController.view;
+        self.contentView.clipsToBounds = NO;
+        self.contentView.frame = CGRectMake(0, 0, scene.settings.frame.size.width, scene.settings.frame.size.height);
+        self.contentView.safeAreaInsets = self.view.safeAreaInsets;
+        if(!self.isNativeWindow) {
+            // Freeze safe area insets for virtual window
+            [self.contentView _setSafeAreaInsetsFrozen:YES updateForUnfreeze:NO];
+        }
         
         /// Fix keyboard focus by setting up event deferring extension. Previously we worked around it by changing identifier, but that broke other things
         _UISceneEventDeferringHostComponent *deferringComponent = self.hostingController._eventDeferringComponent;
@@ -199,11 +202,6 @@
         // _scenePresenter was a property in 26, but made only ivar in 27
         self.presenter = [self.hostingController.sceneView valueForKey:@"_scenePresenter"];
         self.sceneID = self.presenter.identifier;
-        
-        self.contentView = self.hostingController.sceneViewController.view;
-        self.contentView.clipsToBounds = NO;
-        self.contentView.frame = self.settings.frame;
-        self.contentView.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
     } else {
         self.sceneID = [NSString stringWithFormat:@"sceneID:%@-%@", @"LiveProcess", self.dataUUID];
         FBSMutableSceneDefinition *definition = [PrivClass(FBSMutableSceneDefinition) definition];
@@ -293,7 +291,7 @@
             return;
         }
         CGRect frame = CGRectMake(self.view.frame.origin.x, self.view.frame.origin.y, self.view.frame.size.width / self.scaleRatio, self.view.frame.size.height / self.scaleRatio);
-        [self.presenter.scene updateSettingsWithBlock:^(UIMutableApplicationSceneSettings *settings) {
+        [self updateSettingsWithBlock:^(UIMutableApplicationSceneSettings *settings) {
             settings.deviceOrientation = UIDevice.currentDevice.orientation;
             settings.interfaceOrientation = self.view.window.windowScene.interfaceOrientation;
             if(UIInterfaceOrientationIsLandscape(settings.interfaceOrientation)) {
@@ -307,6 +305,46 @@
             }
         }];
     });
+}
+- (void)updateSettingsWithBlock:(void(^)(UIMutableApplicationSceneSettings *settings))updateSettingsBlock {
+    if(!self.hostingController && self.contentView) {
+        // Legacy path
+        [self.presenter.scene updateSettingsWithBlock:updateSettingsBlock];
+        return;
+    }
+    
+    /// iOS 17.4 path, most are automatically handled by setting values to _UISceneHostingViewController
+    /// This is also reachable on legacy path when contentView is nil during early setup
+    UIMutableApplicationSceneSettings *tempSettings = [self.presenter.scene.settings mutableCopy];
+    if(!tempSettings) {
+        tempSettings = [UIMutableApplicationSceneSettings new];
+    }
+    tempSettings.peripheryInsets = self.contentView.safeAreaInsets;
+    updateSettingsBlock(tempSettings);
+    CGRect frame = tempSettings.frame;
+    if(UIInterfaceOrientationIsLandscape(tempSettings.interfaceOrientation)) {
+        frame = CGRectMake(frame.origin.x, frame.origin.y, frame.size.height, frame.size.width);
+    }
+    
+    if (self.contentView) {
+        BOOL isiOS26 = NO;
+        if(@available(iOS 19.0, *)) { if(@available(iOS 27.0, *)) {} else isiOS26 = YES; }
+        // Discard position
+        frame.origin = CGPointZero;
+        self.contentView.frame = frame;
+        self.contentView.safeAreaInsets = tempSettings.peripheryInsets;
+        if(isiOS26) {
+            // iOS 26.x changed to some weird _UISceneSafeAreaSettingsExtension API which only works with Liquid Glass-enabled apps for some reason, so we update via settings path here. iOS 27 fixes this so no need to apply there
+            [self.presenter.scene updateSettingsWithBlock:^(UIMutableApplicationSceneSettings *settings) {
+                settings.peripheryInsets = tempSettings.peripheryInsets;
+                settings.safeAreaInsetsPortrait = tempSettings.safeAreaInsetsPortrait;
+            }];
+        }
+    } else {
+        // This method can be called while contentView is nil to set up initial frame and safe area
+        self.view.frame = frame;
+        self.view.safeAreaInsets = tempSettings.peripheryInsets;
+    }
 }
 
 - (BOOL)isAppRunning {
@@ -322,7 +360,7 @@
         if(self.sceneID) {
             [[PrivClass(FBSceneManager) sharedInstance] destroyScene:self.sceneID withTransitionContext:nil];
         }
-        if(@available(iOS 17.4, *)) {
+        if(self.hostingController) {
             [self.hostingController invalidate];
             [self.hostingController.sceneViewController removeFromParentViewController];
             self.hostingController = nil;
