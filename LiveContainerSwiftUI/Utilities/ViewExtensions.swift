@@ -322,6 +322,17 @@ private struct UIKitContextMenuModifier : ViewModifier {
     }
 }
 
+private class SizedHostingController<Content: View>: UIHostingController<Content> {
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+
+        let size = sizeThatFits(in: UIView.layoutFittingCompressedSize)
+        if preferredContentSize != size {
+            preferredContentSize = size
+        }
+    }
+}
+
 private struct UIKitContextMenuContainer<Content: View>: UIViewControllerRepresentable {
     let menuProvider: () -> UIMenu
     let content: Content
@@ -336,11 +347,15 @@ private struct UIKitContextMenuContainer<Content: View>: UIViewControllerReprese
     }
 
     func makeUIViewController(context: Context) -> UIHostingController<Content> {
-        let controller = UIHostingController(rootView: content)
-        controller.view.backgroundColor = .clear
+        let controller: UIHostingController<Content>
+        
         if #available(iOS 16.0, *) {
+            controller = UIHostingController(rootView: content)
             controller.sizingOptions = [.intrinsicContentSize]
+        } else {
+            controller = SizedHostingController(rootView: content)
         }
+        controller.view.backgroundColor = .clear
         controller.view.addInteraction(UIContextMenuInteraction(delegate: context.coordinator))
         return controller
     }
@@ -371,6 +386,19 @@ private struct UIKitContextMenuContainer<Content: View>: UIViewControllerReprese
             UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
                 self.menuProvider()
             }
+        }
+    }
+}
+
+struct IconImageView: View {
+    var icon: UIImage
+    
+    var body: some View {
+        GeometryReader { g in
+            Image(uiImage: icon)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: g.size.width*0.2667))
         }
     }
 }

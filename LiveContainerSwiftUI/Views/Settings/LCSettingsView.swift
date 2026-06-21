@@ -7,13 +7,29 @@
 
 import Foundation
 import SwiftUI
+import UserNotifications
 
-enum JITEnablerType : Int {
+enum JITEnablerType : Int, CaseIterable, Identifiable {
+    var id: Int { rawValue }
     case SideJITServer = 0
-    case StkiJIT = 1
+    case StikJIT = 1
     case JITStreamerEBLegacy = 2
     case StikJITLC = 3
     case SideStore = 4
+    case StosDebug = 5
+    case StosDebugLC = 6
+    
+    var displayName: String {
+        switch self {
+        case .StikJIT: "StikDebug"
+        case .StikJITLC: "StikDebug (Another LiveContainer)"
+        case .StosDebug: "StosDebug"
+        case .StosDebugLC: "StosDebug (Another LiveContainer)"
+        case .SideStore: "SideStore"
+        case .JITStreamerEBLegacy: "JitStreamer-EB (Relaunch)"
+        case .SideJITServer: "SideJITServer/JITStreamer 2.0"
+        }
+    }
 }
 
 struct LCSettingsView: View {
@@ -117,7 +133,7 @@ struct LCSettingsView: View {
                             LCMultiLCManagementView()
                         } label: {
                             if sharedModel.multiLCStatus == 0 {
-                                Text("lc.settings.multiLCInstall".loc)
+                                Text("lc.settings.multiLC".loc)
                             } else if sharedModel.multiLCStatus == 2 {
                                 Text("lc.settings.multiLCIsSecond".loc)
                             }
@@ -167,11 +183,9 @@ struct LCSettingsView: View {
                         }
                     }
                     Picker(selection: $JITEnabler) {
-                        Text("SideJITServer/JITStreamer 2.0").tag(JITEnablerType.SideJITServer)
-                        Text("StikDebug").tag(JITEnablerType.StkiJIT)
-                        Text("StikDebug (Another LiveContainer)").tag(JITEnablerType.StikJITLC)
-                        Text("SideStore").tag(JITEnablerType.SideStore)
-                        Text("JitStreamer-EB (Relaunch)").tag(JITEnablerType.JITStreamerEBLegacy)
+                        ForEach(JITEnablerType.allCases) { enablerType in
+                            Text(enablerType.displayName).tag(enablerType)
+                        }
                     } label: {
                         Text("lc.settings.jitEnabler".loc)
                     }
@@ -240,8 +254,23 @@ struct LCSettingsView: View {
                 } footer: {
                     Text("lc.settings.dontSignDesc".loc)
                 }
-                    
+
                 Section {
+                    Button {
+                        clearNotifications()
+                    } label: {
+                        Text("lc.settings.clearNotifications".loc)
+                    }
+                }
+
+                Section {
+                    if sharedModel.multiLCStatus != 2 {
+                        NavigationLink {
+                            LCStorageManagementView()
+                        } label: {
+                            Text("lc.settings.storageManagement".loc)
+                        }
+                    }
                     NavigationLink {
                         LCDataManagementView(appDataFolderNames: $appDataFolderNames)
                     } label: {
@@ -444,7 +473,18 @@ struct LCSettingsView: View {
     func openTwitter() {
         UIApplication.shared.open(URL(string: "https://twitter.com/khanhduytran0")!)
     }
-    
+
+    func clearNotifications() {
+        let notificationCenter = UNUserNotificationCenter.current()
+        notificationCenter.removeAllDeliveredNotifications()
+        notificationCenter.removeAllPendingNotificationRequests()
+        if #available(iOS 16.0, *) {
+            notificationCenter.setBadgeCount(0)
+        } else {
+            UIApplication.shared.applicationIconBadgeNumber = 0
+        }
+    }
+
     func export() {
         let fileManager = FileManager.default
         let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!

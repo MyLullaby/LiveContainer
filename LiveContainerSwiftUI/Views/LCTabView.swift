@@ -13,6 +13,7 @@ struct LCTabView: View {
     @Binding var tweakFolderNames: [String]
     
     @State var errorShow = false
+    @State var crashReportShow = false
     @State var errorInfo = ""
     
     @State var previousSelectedTab : LCTabIdentifier = .apps
@@ -21,13 +22,24 @@ struct LCTabView: View {
     @EnvironmentObject var sceneDelegate: SceneDelegate
     @State var shouldToggleMainWindowOpen = false
     @Environment(\.scenePhase) var scenePhase
+    @StateObject var downloadHelper = DownloadHelper()
+    
+    @StateObject var searchContextAppList = SearchContext()
+    @StateObject var searchContextSource = SearchContext()
+    
     let pub = NotificationCenter.default.publisher(for: UIScene.didDisconnectNotification)
+    
+    private var appListView: LCAppListView {
+        LCAppListView(appDataFolderNames: $appDataFolderNames, tweakFolderNames: $tweakFolderNames, searchContext: searchContextAppList)
+    }
+    
+    private var sourcesView: LCSourcesView {
+        LCSourcesView(searchContext: searchContextSource)
+    }
 
     
     var body: some View {
         Group {
-            let appListView = LCAppListView(appDataFolderNames: $appDataFolderNames, tweakFolderNames: $tweakFolderNames)
-            let sourcesView = LCSourcesView()
             if #available(iOS 19.0, *), SharedModel.isLiquidGlassSearchEnabled {
                 TabView(selection: $sharedModel.selectedTab) {
                     if DataManager.shared.model.multiLCStatus != 2 {
@@ -49,10 +61,10 @@ struct LCTabView: View {
                     Tab("Search".loc, systemImage: "magnifyingglass", value: LCTabIdentifier.search, role: .search) {
                         if previousSelectedTab == .sources {
                             sourcesView
-                                .searchable(text: sourcesView.$searchContext.query)
+                                .searchable(text: $searchContextSource.query)
                         } else {
                             appListView
-                                .searchable(text: appListView.$searchContext.query)
+                                .searchable(text: $searchContextAppList.query)
                         }
 
                     }
@@ -87,6 +99,8 @@ struct LCTabView: View {
                 }
             }
         }
+        .downloadAlert(helper: downloadHelper)
+        .environmentObject(downloadHelper)
         .alert("lc.common.error".loc, isPresented: $errorShow){
             Button("lc.common.ok".loc, action: {
             })
@@ -95,6 +109,32 @@ struct LCTabView: View {
             })
         } message: {
             Text(errorInfo)
+        }
+        .sheet(isPresented: $crashReportShow) {
+            NavigationView {
+                ScrollView {
+                    Text(errorInfo)
+                        .font(.system(size: 12).monospaced())
+                        .fixedSize(horizontal: false, vertical: false)
+                        .textSelection(.enabled)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("lc.common.copy".loc, action: {
+                            copyError()
+                        })
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("lc.common.ok".loc, action: {
+                            crashReportShow = false
+                        })
+                    }
+                }
+                .navigationTitle("lc.common.error".loc)
+                .navigationBarTitleDisplayMode(.inline)
+            }
         }
         .task {
             closeDuplicatedWindow()
@@ -176,7 +216,7 @@ struct LCTabView: View {
         }
         UserDefaults.standard.removeObject(forKey: "error")
         errorInfo = errorStr
-        errorShow = true
+        crashReportShow = true
     }
     
     func copyError() {
