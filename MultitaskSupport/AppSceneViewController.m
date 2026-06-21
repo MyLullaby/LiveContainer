@@ -266,6 +266,15 @@
         baseSettings.interruptionPolicy = 0;
         baseSettings.peripheryInsets = self.view.window.safeAreaInsets;
         [self.presenter.scene updateSettings:baseSettings withTransitionContext:newContext completion:nil];
+        
+        // Not sure what actionType 2 is, but it's only set when this scene enters foreground, so we can pass URL scheme here
+        if(actionType == 2) {
+            NSString *launchUrl = [NSUserDefaults.standardUserDefaults stringForKey:@"launchAppUrlScheme"];
+            if(launchUrl) {
+                [NSUserDefaults.standardUserDefaults removeObjectForKey:@"launchAppUrlScheme"];
+                [self openURLScheme:launchUrl];
+            }
+        }
     } else {
         [self.delegate appSceneVC:self didUpdateFromSettings:baseSettings transitionContext:newContext];
     }
