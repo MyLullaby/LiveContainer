@@ -333,7 +333,7 @@ extension LCUtils {
                 }
                 
                 let launchURL = URL(string: "\(freeScheme)://open-url?url=\(encodedStr)")!
-                
+                LCUtils.appGroupUserDefault.set(freeScheme, forKey: "LCLaunchExtensionScheme")
                 LCUtils.appGroupUserDefault.set(appToLaunch.appInfo.relativeBundlePath, forKey: "LCLaunchExtensionBundleID")
                 LCUtils.appGroupUserDefault.set(Date.now, forKey: "LCLaunchExtensionLaunchDate")
                 onServerMessage?("JIT acquisition will continue in another LiveContainer.")
@@ -394,7 +394,7 @@ extension LCUtils {
                 }
                 
                 launchURL = URL(string: "\(freeScheme)://open-url?url=\(encodedStr)")!
-                
+                LCUtils.appGroupUserDefault.set(freeScheme, forKey: "LCLaunchExtensionScheme")
                 LCUtils.appGroupUserDefault.set(appToLaunch.appInfo.relativeBundlePath, forKey: "LCLaunchExtensionBundleID")
                 LCUtils.appGroupUserDefault.set(Date.now, forKey: "LCLaunchExtensionLaunchDate")
                 onServerMessage?("JIT acquisition will continue in another LiveContainer.")
@@ -507,11 +507,11 @@ extension LCUtils {
         }
     }
     
-    static func openSideStore(delegate: LCAppModelDelegate? = nil) {
+    static func openSideStore(delegate: LCAppModelDelegate? = nil, urlStr: String? = nil) {
         let sideStoreApp = LCAppModel(appInfo: BuiltInSideStoreAppInfo(), delegate: delegate)
         
         Task {
-            try await sideStoreApp.runApp(bundleIdOverride: "builtinSideStore")
+            try await sideStoreApp.runApp(bundleIdOverride: "builtinSideStore", urlStr: urlStr)
         }
     }
 }

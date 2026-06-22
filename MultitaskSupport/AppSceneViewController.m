@@ -21,6 +21,7 @@
 @end
 
 @interface AppSceneViewController()
+@property(nonatomic) API_AVAILABLE(ios(17.0)) _UISceneHostingController *hostingController;
 @property(nonatomic) UIWindowScene *hostScene;
 @property(nonatomic) NSString *sceneID;
 @property(nonatomic) NSExtension* extension;
@@ -33,14 +34,11 @@
 - (instancetype)initWithBundleId:(NSString*)bundleId dataUUID:(NSString*)dataUUID delegate:(id<AppSceneViewControllerDelegate>)delegate {
     self = [super initWithNibName:nil bundle:nil];
     self.view = [[UIView alloc] init];
-    self.contentView = [[UIView alloc] init];
-    [self.view addSubview:_contentView];
     self.delegate = delegate;
     self.dataUUID = dataUUID;
     self.bundleId = bundleId;
     self.scaleRatio = 1.0;
     self.isAppTerminationCleanUpCalled = false;
-    self.settings = [UIMutableApplicationSceneSettings new];
     // init extension
     NSError* error = nil;
     _extension = [NSExtension extensionWithIdentifier:LCUtils.liveProcessBundleIdentifier error:&error];
@@ -119,59 +117,114 @@
 
 - (void)setUpAppPresenter {
     RBSProcessPredicate* predicate = [PrivClass(RBSProcessPredicate) predicateMatchingIdentifier:@(self.pid)];
-    
     FBProcessManager *manager = [PrivClass(FBProcessManager) sharedInstance];
     // At this point, the process is spawned and we're ready to create a scene to render in our app
     RBSProcessHandle* processHandle = [PrivClass(RBSProcessHandle) handleForPredicate:predicate error:nil];
     [manager registerProcessForAuditToken:processHandle.auditToken];
-    // NSString *identifier = [NSString stringWithFormat:@"sceneID:%@-%@", bundleID, @"default"];
-    self.sceneID = [NSString stringWithFormat:@"sceneID:%@-%@", @"LiveProcess", self.dataUUID];
+    UIApplicationSceneSpecification *specification = [UIApplicationSceneSpecification specification];
     
-    FBSMutableSceneDefinition *definition = [PrivClass(FBSMutableSceneDefinition) definition];
-    definition.identity = [PrivClass(FBSSceneIdentity) identityForIdentifier:self.sceneID];
-    definition.clientIdentity = [PrivClass(FBSSceneClientIdentity) identityForProcessIdentity:processHandle.identity];
-    definition.specification = [UIApplicationSceneSpecification specification];
-    FBSMutableSceneParameters *parameters = [PrivClass(FBSMutableSceneParameters) parametersForSpecification:definition.specification];
-    
-    UIMutableApplicationSceneSettings *settings = self.settings;
-    settings.canShowAlerts = YES;
-    settings.cornerRadiusConfiguration = [[PrivClass(BSCornerRadiusConfiguration) alloc] initWithTopLeft:self.view.layer.cornerRadius bottomLeft:self.view.layer.cornerRadius bottomRight:self.view.layer.cornerRadius topRight:self.view.layer.cornerRadius];
-    settings.displayConfiguration = UIScreen.mainScreen.displayConfiguration;
-    settings.foreground = YES;
-    
-    settings.deviceOrientation = UIDevice.currentDevice.orientation;
-    settings.interfaceOrientation = UIApplication.sharedApplication.statusBarOrientation;
-    if(UIInterfaceOrientationIsLandscape(settings.interfaceOrientation)) {
-        settings.frame = CGRectMake(0, 0, self.view.frame.size.height, self.view.frame.size.width);
+    void (^updateSceneSettings)(id) = ^void(UIMutableApplicationSceneSettings *settings) {
+        settings.canShowAlerts = YES;
+        settings.cornerRadiusConfiguration = [[PrivClass(BSCornerRadiusConfiguration) alloc] initWithTopLeft:self.view.layer.cornerRadius bottomLeft:self.view.layer.cornerRadius bottomRight:self.view.layer.cornerRadius topRight:self.view.layer.cornerRadius];
+        settings.displayConfiguration = UIScreen.mainScreen.displayConfiguration;
+        settings.foreground = YES;
+        
+        settings.deviceOrientation = UIDevice.currentDevice.orientation;
+        settings.interfaceOrientation = UIApplication.sharedApplication.statusBarOrientation;
+        if(UIInterfaceOrientationIsLandscape(settings.interfaceOrientation)) {
+            settings.frame = CGRectMake(0, 0, self.view.frame.size.height, self.view.frame.size.width);
+        } else {
+            settings.frame = CGRectMake(0, 0, self.view.frame.size.width, self.view.frame.size.height);
+        }
+        //settings.interruptionPolicy = 2; // reconnect
+        settings.level = 1;
+        settings.persistenceIdentifier = self.dataUUID;
+        if(self.isNativeWindow) {
+            UIEdgeInsets defaultInsets = self.view.window.safeAreaInsets;
+            settings.peripheryInsets = defaultInsets;
+            settings.safeAreaInsetsPortrait = defaultInsets;
+        }
+        
+        settings.statusBarDisabled = !self.isNativeWindow;
+        //settings.previewMaximumSize =
+        //settings.deviceOrientationEventsEnabled = YES;
+        
+        self.settings = settings;
+    };
+    void (^updateSceneClientSettings)(id) = ^void(UIMutableApplicationSceneClientSettings *clientSettings) {
+        clientSettings.interfaceOrientation = UIInterfaceOrientationPortrait;
+        clientSettings.statusBarStyle = 0;
+    };
+
+    if (@available(iOS 17.4, *)) {
+        // Use new API for iOS 17+. While some of these APIs are available since 17.0, we're only interested in fixing event deferring issue
+        _UISceneHostingControllerAdvancedConfiguration *config = [[_UISceneHostingControllerAdvancedConfiguration alloc] initWithProcessIdentity:processHandle.identity];
+        config.sceneSpecification = specification;
+        if (@available(iOS 27.0, *)) {} else {
+            // on 27 manually adding this is not need, also setAdditionalExtensions: doesn't exist for some reason
+            config.additionalExtensions = [NSOrderedSet orderedSetWithArray:@[
+                PrivClass(_UISceneHostingEventDeferringExtension),
+            ]];
+        }
+        self.hostingController = [[_UISceneHostingController alloc] initWithAdvancedConfiguration:config];
+        FBScene *scene = [self.hostingController valueForKey:@"_fbScene"];
+        [scene configureParameters:^(FBSMutableSceneParameters *parameters) {
+            [parameters updateSettingsWithBlock:updateSceneSettings];
+            [parameters updateClientSettingsWithBlock:updateSceneClientSettings];
+        }];
+        
+        /// Fix keyboard focus by setting up event deferring extension. Previously we worked around it by changing identifier, but that broke other things
+        _UISceneEventDeferringHostComponent *deferringComponent = self.hostingController._eventDeferringComponent;
+        NSAssert(deferringComponent, @"Unexpectedly nil _UISceneEventDeferringHostComponent");
+        if (@available(iOS 27.0, *)) { // _UIKeyboardArbiterUsesDeferringGraph()
+            /// UIKitCore`__85-[_UIRemoteViewControllerSceneHostingImpl _viewServiceHostSessionDidConnectToClient:]_block_invoke
+            /// iOS 27 requires setting up _UISceneEventDeferringHostComponent for keyboard focus to work
+            
+            /// Replicate these methods since they are made private
+            /// -[_UISceneEventDeferringHostComponent setFirstResponderTrackingSelectionPath:]:
+            [deferringComponent setValue:self forKey:@"_firstResponderTrackingSelectionPath"];
+            // if (!deferringComponent->_flags.clientIsInChain) return;
+            /// -[_UISceneEventDeferringHostComponent becomeFirstResponderIfNecessary]:
+            // if (deferringComponent->_flags.maintainHostFirstResponderWhenClientWantsKeyboard)
+            
+            deferringComponent.grantBehavior = 2;
+            deferringComponent.selectionRequestBehavior = 2;
+        } else {
+            /// UIKitCore`-[_UISceneHostingController createSceneWithConfiguration:]
+            /// Lower iOS uses _UISceneHostingEventDeferringExtension. Maybe setting this is optional
+            deferringComponent.requestEventDeferralForAllFirstResponderChanges = YES;
+        }
+        
+        [self addChildViewController:self.hostingController.sceneViewController];
+        // _scenePresenter was a property in 26, but made only ivar in 27
+        self.presenter = [self.hostingController.sceneView valueForKey:@"_scenePresenter"];
+        self.sceneID = self.presenter.identifier;
+        
+        self.contentView = self.hostingController.sceneViewController.view;
+        self.contentView.clipsToBounds = NO;
+        self.contentView.frame = self.settings.frame;
+        self.contentView.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
     } else {
-        settings.frame = CGRectMake(0, 0, self.view.frame.size.width, self.view.frame.size.height);
+        self.sceneID = [NSString stringWithFormat:@"sceneID:%@-%@", @"LiveProcess", self.dataUUID];
+        FBSMutableSceneDefinition *definition = [PrivClass(FBSMutableSceneDefinition) definition];
+        definition.identity = [PrivClass(FBSSceneIdentity) identityForIdentifier:self.sceneID];
+        definition.clientIdentity = [PrivClass(FBSSceneClientIdentity) identityForProcessIdentity:processHandle.identity];
+        definition.specification = specification;
+        
+        FBSMutableSceneParameters *parameters = [PrivClass(FBSMutableSceneParameters) parametersForSpecification:specification];
+        [parameters updateSettingsWithBlock:updateSceneSettings];
+        [parameters updateClientSettingsWithBlock:updateSceneClientSettings];
+        FBScene *scene = [[PrivClass(FBSceneManager) sharedInstance] createSceneWithDefinition:definition initialParameters:parameters];
+        self.presenter = [scene.uiPresentationManager createPresenterWithIdentifier:self.sceneID];
+        [self.presenter modifyPresentationContext:^(UIMutableScenePresentationContext *context) {
+            context.appearanceStyle = 2;
+        }];
+        [self.presenter activate];
+        
+        self.contentView = [[UIView alloc] init];
+        [self.contentView addSubview:self.presenter.presentationView];
     }
-    //settings.interruptionPolicy = 2; // reconnect
-    settings.level = 1;
-    settings.persistenceIdentifier = self.dataUUID;
-    if(self.isNativeWindow) {
-        UIEdgeInsets defaultInsets = self.view.window.safeAreaInsets;
-        settings.peripheryInsets = defaultInsets;
-        settings.safeAreaInsetsPortrait = defaultInsets;
-    }
-    
-    settings.statusBarDisabled = !self.isNativeWindow;
-    //settings.previewMaximumSize =
-    //settings.deviceOrientationEventsEnabled = YES;
-    parameters.settings = settings;
-    
-    UIMutableApplicationSceneClientSettings *clientSettings = [UIMutableApplicationSceneClientSettings new];
-    clientSettings.interfaceOrientation = UIInterfaceOrientationPortrait;
-    clientSettings.statusBarStyle = 0;
-    parameters.clientSettings = clientSettings;
-    
-    FBScene *scene = [[PrivClass(FBSceneManager) sharedInstance] createSceneWithDefinition:definition initialParameters:parameters];
-    
-    self.presenter = [scene.uiPresentationManager createPresenterWithIdentifier:self.sceneID];
-    [self.presenter modifyPresentationContext:^(UIMutableScenePresentationContext *context) {
-        context.appearanceStyle = 2;
-    }];
-    [self.presenter activate];
+    [self.view addSubview:_contentView];
     
     // If we have a staging URL scheme, pass it now
     NSString *launchUrl = [NSUserDefaults.standardUserDefaults stringForKey:@"launchAppUrlScheme"];
@@ -184,8 +237,6 @@
     [self.extension setRequestInterruptionBlock:^(NSUUID *uuid) {
         [weakSelf appTerminationCleanUp];
     }];
-    
-    [self.contentView addSubview:self.presenter.presentationView];
     self.contentView.layer.anchorPoint = CGPointMake(0, 0);
     self.contentView.layer.position = CGPointMake(0, 0);
     
@@ -198,7 +249,7 @@
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [self.extension _kill:SIGKILL];
         });
-    }    
+    }
 }
 
 - (void)_performActionsForUIScene:(UIScene *)scene withUpdatedFBSScene:(id)fbsScene settingsDiff:(FBSSceneSettingsDiff *)diff fromSettings:(UIApplicationSceneSettings *)settings transitionContext:(id)context lifecycleActionType:(uint32_t)actionType {
@@ -262,11 +313,15 @@
         if(self.sceneID) {
             [[PrivClass(FBSceneManager) sharedInstance] destroyScene:self.sceneID withTransitionContext:nil];
         }
-        if(self.presenter){
+        if(@available(iOS 17.4, *)) {
+            [self.hostingController invalidate];
+            [self.hostingController.sceneViewController removeFromParentViewController];
+            self.hostingController = nil;
+        } else if(self.presenter){
             [self.presenter deactivate];
             [self.presenter invalidate];
-            self.presenter = nil;
         }
+        self.presenter = nil;
         
         [self.delegate appSceneVCAppDidExit:self];
         [MultitaskManager unregisterMultitaskContainerWithContainer:self.dataUUID];
