@@ -83,6 +83,8 @@ struct AppSceneViewSwiftUI: UIViewControllerRepresentable {
                     settings.setFrame(CGRect(x: 0, y: 0, width: vc.view.frame.size.width, height: vc.view.frame.size.height))
                 }
             }
+            // fix live resize
+            vc.contentView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         }
         
         func appSceneVC(_ vc: AppSceneViewController!, didUpdateFrom settings: UIMutableApplicationSceneSettings!, transitionContext context: Any!, lifecycleActionType actionType: UInt32) {

@@ -15,6 +15,7 @@
 
 @interface AppSceneViewController()
 @property int resizeDebounceToken;
+@property CFTimeInterval lastResizeRequestTime;
 @property CGPoint normalizedOrigin;
 @property bool isNativeWindow;
 @property NSUUID* identifier;
@@ -147,7 +148,9 @@
             ]];
         }
         self.hostingController = [[_UISceneHostingController alloc] initWithAdvancedConfiguration:config];
-        self.contentView = self.hostingController.sceneView;
+        /// !! do NOT use self.hostingController.sceneView here as it breaks keyboard focus on iOS 26 below. I have no idea why this happens even though both return the same object. Maybe sceneView didn't initialize its ViewController properly?
+        self.contentView = self.hostingController.sceneViewController.view;
+        self.contentView.clipsToBounds = NO;
         // _scenePresenter was a property in 26, but made only ivar in 27
         self.presenter = [self.contentView valueForKey:@"_scenePresenter"];
         self.sceneID = self.presenter.identifier;
@@ -179,9 +182,6 @@
             deferringComponent.requestEventDeferralForAllFirstResponderChanges = YES;
         }
         
-        self.contentView.clipsToBounds = NO;
-        self.contentView.frame = CGRectMake(0, 0, scene.settings.frame.size.width, scene.settings.frame.size.height);
-        self.contentView.safeAreaInsets = self.view.safeAreaInsets;
         // Now it's time to get the initial settings from decorated VC
         [self.delegate appSceneVCWillActivateScene:self];
         [self addChildViewController:self.hostingController.sceneViewController];
@@ -246,32 +246,39 @@
 }
 
 - (void)viewWillLayoutSubviews {
-    [self updateFrameWithSettingsBlock:self.nextUpdateSettingsBlock];
-    self.nextUpdateSettingsBlock = nil;
+    /// For native window we let iPadOS handle it however it wants, which is usually live resize (autoresizingMask set in appSceneVCWillActivateScene)
+    if(_contentView.autoresizingMask != (UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight)) {
+        [self updateFrameWithSettingsBlock:nil];
+    }
 }
 - (void)updateFrameWithSettingsBlock:(void (^)(UIMutableApplicationSceneSettings *settings))block {
-    __block int currentDebounceToken = self.resizeDebounceToken + 1;
-    _resizeDebounceToken = currentDebounceToken;
-    dispatch_time_t delay = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC));
-    dispatch_after(delay, dispatch_get_main_queue(), ^{
+    __block int currentDebounceToken = ++_resizeDebounceToken;
+    dispatch_block_t queueBlock = ^{
         if(currentDebounceToken != self.resizeDebounceToken) {
             return;
         }
-        CGRect frame = CGRectMake(self.view.frame.origin.x, self.view.frame.origin.y, self.view.frame.size.width / self.scaleRatio, self.view.frame.size.height / self.scaleRatio);
         [self updateSettingsWithBlock:^(UIMutableApplicationSceneSettings *settings) {
             settings.deviceOrientation = UIDevice.currentDevice.orientation;
             settings.interfaceOrientation = self.view.window.windowScene.interfaceOrientation;
+            CGRect frame = CGRectMake(self.view.frame.origin.x, self.view.frame.origin.y, self.view.frame.size.width / self.scaleRatio, self.view.frame.size.height / self.scaleRatio);
             if(UIInterfaceOrientationIsLandscape(settings.interfaceOrientation)) {
-                CGRect frame2 = CGRectMake(frame.origin.x, frame.origin.y, frame.size.height, frame.size.width);
-                settings.frame = frame2;
-            } else {
-                settings.frame = frame;
+                CGSize size = frame.size;
+                frame.size.width = size.height;
+                frame.size.height = size.width;
             }
+            settings.frame = frame;
             if(block) {
                 block(settings);
             }
         }];
-    });
+    };
+    if(_shouldSkipDebounceOnce) {
+        _shouldSkipDebounceOnce = NO;
+        queueBlock();
+    } else {
+        dispatch_time_t delay = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC));
+        dispatch_after(delay, dispatch_get_main_queue(), queueBlock);
+    }
 }
 - (void)updateSettingsWithBlock:(void(^)(UIMutableApplicationSceneSettings *settings))updateSettingsBlock {
     if(!self.hostingController && self.contentView) {
@@ -303,8 +310,10 @@
         if(isiOS26) {
             // iOS 26.x changed to some weird _UISceneSafeAreaSettingsExtension API which only works with Liquid Glass-enabled apps for some reason, so we update via settings path here. iOS 27 fixes this so no need to apply there
             [self.presenter.scene updateSettingsWithBlock:^(UIMutableApplicationSceneSettings *settings) {
+                NSLog(@"P %@ S %@", NSStringFromUIEdgeInsets(tempSettings.peripheryInsets), NSStringFromUIEdgeInsets(tempSettings.safeAreaInsetsPortrait));
                 settings.peripheryInsets = tempSettings.peripheryInsets;
                 settings.safeAreaInsetsPortrait = tempSettings.safeAreaInsetsPortrait;
+                settings.frame = tempSettings.frame;
             }];
         }
     } else {
