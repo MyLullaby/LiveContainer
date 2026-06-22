@@ -292,7 +292,7 @@ API_AVAILABLE(ios(17.0))
 @interface _UISceneHostingView : UIView
 - (_UIScenePresenter *)_scenePresenter;
 @end
-// Keep the class available on all versions for quick null check
+API_AVAILABLE(ios(17.0))
 @interface _UISceneHostingController : NSObject
 - (instancetype)initWithAdvancedConfiguration:(_UISceneHostingControllerAdvancedConfiguration *)config API_AVAILABLE(ios(17.4));
 //- (instancetype)initWithProcessIdentity:(RBSProcessIdentity *)identity sceneSpecification:(FBSSceneSpecification *)spec API_AVAILABLE(ios(17.0));

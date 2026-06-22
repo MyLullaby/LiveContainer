@@ -817,7 +817,7 @@ int LiveContainerMain(int argc, char *argv[]) {
     }
     
     void *LiveContainerSwiftUIHandle = dlopen("@executable_path/Frameworks/LiveContainerSwiftUI.framework/LiveContainerSwiftUI", RTLD_LAZY);
-    assert(LiveContainerSwiftUIHandle);
+    NSCAssert(LiveContainerSwiftUIHandle, @"%s", dlerror());
     
     if(sideStoreExist) {
         void* sideStoreHandle = dlopen("@executable_path/Frameworks/SideStore.framework/SideStore", RTLD_LAZY);

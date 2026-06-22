@@ -281,7 +281,7 @@
     }
 }
 - (void)updateSettingsWithBlock:(void(^)(UIMutableApplicationSceneSettings *settings))updateSettingsBlock {
-    if(!self.hostingController && self.contentView) {
+    if(!_hostingController && self.contentView) {
         // Legacy path
         [self.presenter.scene updateSettingsWithBlock:updateSettingsBlock];
         return;
@@ -313,7 +313,7 @@
                 NSLog(@"P %@ S %@", NSStringFromUIEdgeInsets(tempSettings.peripheryInsets), NSStringFromUIEdgeInsets(tempSettings.safeAreaInsetsPortrait));
                 settings.peripheryInsets = tempSettings.peripheryInsets;
                 settings.safeAreaInsetsPortrait = tempSettings.safeAreaInsetsPortrait;
-                settings.frame = tempSettings.frame;
+                //settings.frame = tempSettings.frame;
             }];
         }
     } else {
@@ -336,10 +336,12 @@
         if(self.sceneID) {
             [[PrivClass(FBSceneManager) sharedInstance] destroyScene:self.sceneID withTransitionContext:nil];
         }
-        if(self.hostingController) {
-            [self.hostingController invalidate];
-            [self.hostingController.sceneViewController removeFromParentViewController];
-            self.hostingController = nil;
+        if(self->_hostingController) {
+            if(@available(iOS 17.0, *)) {
+                [self.hostingController invalidate];
+                [self.hostingController.sceneViewController removeFromParentViewController];
+                self.hostingController = nil;
+            }
         } else if(self.presenter){
             [self.presenter deactivate];
             [self.presenter invalidate];
