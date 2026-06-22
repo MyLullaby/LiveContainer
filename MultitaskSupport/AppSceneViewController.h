@@ -17,7 +17,8 @@ API_AVAILABLE(ios(16.0))
 - (void)appSceneVCAppDidExit:(AppSceneViewController*)vc;
 - (void)appSceneVC:(AppSceneViewController*)vc didInitializeWithError:(NSError*)error;
 @optional
-- (void)appSceneVC:(AppSceneViewController*)vc didUpdateFromSettings:(UIMutableApplicationSceneSettings *)settings transitionContext:(id)context;
+- (void)appSceneVC:(AppSceneViewController*)vc didUpdateFromSettings:(UIMutableApplicationSceneSettings *)settings transitionContext:(id)context lifecycleActionType:(uint32_t)actionType;
+- (void)appSceneVCWillActivateScene:(AppSceneViewController *)vc;
 @end
 
 API_AVAILABLE(ios(16.0))

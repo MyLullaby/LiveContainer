@@ -124,23 +124,9 @@
         settings.cornerRadiusConfiguration = [[PrivClass(BSCornerRadiusConfiguration) alloc] initWithTopLeft:self.view.layer.cornerRadius bottomLeft:self.view.layer.cornerRadius bottomRight:self.view.layer.cornerRadius topRight:self.view.layer.cornerRadius];
         settings.displayConfiguration = UIScreen.mainScreen.displayConfiguration;
         settings.foreground = YES;
-        
-        settings.deviceOrientation = UIDevice.currentDevice.orientation;
-        settings.interfaceOrientation = UIApplication.sharedApplication.statusBarOrientation;
-        if(UIInterfaceOrientationIsLandscape(settings.interfaceOrientation)) {
-            settings.frame = CGRectMake(0, 0, self.view.frame.size.height, self.view.frame.size.width);
-        } else {
-            settings.frame = CGRectMake(0, 0, self.view.frame.size.width, self.view.frame.size.height);
-        }
         //settings.interruptionPolicy = 2; // reconnect
         settings.level = 1;
         settings.persistenceIdentifier = self.dataUUID;
-        if(self.isNativeWindow) {
-            UIEdgeInsets defaultInsets = self.view.window.safeAreaInsets;
-            settings.peripheryInsets = defaultInsets;
-            settings.safeAreaInsetsPortrait = defaultInsets;
-        }
-        
         settings.statusBarDisabled = !self.isNativeWindow;
         //settings.previewMaximumSize =
         //settings.deviceOrientationEventsEnabled = YES;
@@ -161,20 +147,15 @@
             ]];
         }
         self.hostingController = [[_UISceneHostingController alloc] initWithAdvancedConfiguration:config];
-        FBScene *scene = [self.hostingController valueForKey:@"_fbScene"];
+        self.contentView = self.hostingController.sceneView;
+        // _scenePresenter was a property in 26, but made only ivar in 27
+        self.presenter = [self.contentView valueForKey:@"_scenePresenter"];
+        self.sceneID = self.presenter.identifier;
+        FBScene *scene = self.presenter.scene;
         [scene configureParameters:^(FBSMutableSceneParameters *parameters) {
             [parameters updateSettingsWithBlock:updateSceneSettings];
             [parameters updateClientSettingsWithBlock:updateSceneClientSettings];
         }];
-        
-        self.contentView = self.hostingController.sceneViewController.view;
-        self.contentView.clipsToBounds = NO;
-        self.contentView.frame = CGRectMake(0, 0, scene.settings.frame.size.width, scene.settings.frame.size.height);
-        self.contentView.safeAreaInsets = self.view.safeAreaInsets;
-        if(!self.isNativeWindow) {
-            // Freeze safe area insets for virtual window
-            [self.contentView _setSafeAreaInsetsFrozen:YES updateForUnfreeze:NO];
-        }
         
         /// Fix keyboard focus by setting up event deferring extension. Previously we worked around it by changing identifier, but that broke other things
         _UISceneEventDeferringHostComponent *deferringComponent = self.hostingController._eventDeferringComponent;
@@ -198,10 +179,12 @@
             deferringComponent.requestEventDeferralForAllFirstResponderChanges = YES;
         }
         
+        self.contentView.clipsToBounds = NO;
+        self.contentView.frame = CGRectMake(0, 0, scene.settings.frame.size.width, scene.settings.frame.size.height);
+        self.contentView.safeAreaInsets = self.view.safeAreaInsets;
+        // Now it's time to get the initial settings from decorated VC
+        [self.delegate appSceneVCWillActivateScene:self];
         [self addChildViewController:self.hostingController.sceneViewController];
-        // _scenePresenter was a property in 26, but made only ivar in 27
-        self.presenter = [self.hostingController.sceneView valueForKey:@"_scenePresenter"];
-        self.sceneID = self.presenter.identifier;
     } else {
         self.sceneID = [NSString stringWithFormat:@"sceneID:%@-%@", @"LiveProcess", self.dataUUID];
         FBSMutableSceneDefinition *definition = [PrivClass(FBSMutableSceneDefinition) definition];
@@ -259,23 +242,7 @@
     UIMutableApplicationSceneSettings *baseSettings = [diff settingsByApplyingToMutableCopyOfSettings:settings];
     UIApplicationSceneTransitionContext *newContext = [context copy];
     newContext.actions = nil;
-    if(self.isNativeWindow) {
-        // directly update the settings
-        baseSettings.interruptionPolicy = 0;
-        baseSettings.peripheryInsets = self.view.window.safeAreaInsets;
-        [self.presenter.scene updateSettings:baseSettings withTransitionContext:newContext completion:nil];
-        
-        // Not sure what actionType 2 is, but it's only set when this scene enters foreground, so we can pass URL scheme here
-        if(actionType == 2) {
-            NSString *launchUrl = [NSUserDefaults.standardUserDefaults stringForKey:@"launchAppUrlScheme"];
-            if(launchUrl) {
-                [NSUserDefaults.standardUserDefaults removeObjectForKey:@"launchAppUrlScheme"];
-                [self openURLScheme:launchUrl];
-            }
-        }
-    } else {
-        [self.delegate appSceneVC:self didUpdateFromSettings:baseSettings transitionContext:newContext];
-    }
+    [self.delegate appSceneVC:self didUpdateFromSettings:baseSettings transitionContext:newContext lifecycleActionType:actionType];
 }
 
 - (void)viewWillLayoutSubviews {

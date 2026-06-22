@@ -171,7 +171,7 @@ extern const UIApplication *UIApp;
 - (void)setFrame:(CGRect)frame;
 - (void)setLevel:(NSInteger)level;
 - (void)setStatusBarDisabled:(BOOL)disabled;
-- (void)setInterfaceOrientation:(NSInteger)o;
+- (void)setInterfaceOrientation:(UIInterfaceOrientation)o;
 - (BSSettings *)otherSettings;
 @end
 
@@ -244,6 +244,7 @@ extern const UIApplication *UIApp;
 @property(nonatomic, assign, readonly) FBScene *scene;
 - (instancetype)initWithOwner:(_UIScenePresenterOwner *)manager identifier:(NSString *)scene sortContext:(NSNumber *)context;
 - (void)modifyPresentationContext:(void(^)(UIMutableScenePresentationContext *context))block;
+- (BOOL)isActive;
 - (void)activate;
 - (void)deactivate;
 - (void)invalidate;
