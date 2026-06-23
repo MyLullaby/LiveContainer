@@ -287,7 +287,6 @@ void UIKitFixesInit(void) {
 - (void)maximizeWindow {
     void (^updateSettingsBlock)(UIMutableApplicationSceneSettings *settings);
     
-    self.appSceneVC.contentView.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
     [self.view layoutIfNeeded];
     if (self.isMaximized) {
         updateSettingsBlock = ^(UIMutableApplicationSceneSettings *settings) {
@@ -308,7 +307,6 @@ void UIKitFixesInit(void) {
             UIImage *maximizeImage = [UIImage systemImageNamed:@"arrow.up.left.and.arrow.down.right.circle"];
             UIImageConfiguration *maximizeConfig = [UIImageSymbolConfiguration configurationWithPointSize:16.0 weight:UIImageSymbolWeightMedium];
             self.maximizeButton.image = [maximizeImage imageWithConfiguration:maximizeConfig];
-            self.appSceneVC.contentView.autoresizingMask = 0;
         }];
     } else {
         updateSettingsBlock = ^(UIMutableApplicationSceneSettings *settings) {
@@ -329,9 +327,6 @@ void UIKitFixesInit(void) {
             UIImage *restoreImage = [UIImage systemImageNamed:@"arrow.down.right.and.arrow.up.left.circle"];
             UIImageConfiguration *restoreConfig = [UIImageSymbolConfiguration configurationWithPointSize:16.0 weight:UIImageSymbolWeightMedium];
             self.maximizeButton.image = [restoreImage imageWithConfiguration:restoreConfig];
-            self.appSceneVC.contentView.autoresizingMask = 0;
-            // fix safe area issues with Filza
-            [self.appSceneVC updateSettingsWithBlock:updateSettingsBlock];
         }];
     }
 }

@@ -281,6 +281,11 @@
     }
 }
 - (void)updateSettingsWithBlock:(void(^)(UIMutableApplicationSceneSettings *settings))updateSettingsBlock {
+    if(_shouldIgnoreSceneUpdates) {
+        // Ignore all updates when in PiP mode
+        return;
+    }
+    
     if(!_hostingController && self.contentView) {
         // Legacy path
         [self.presenter.scene updateSettingsWithBlock:updateSettingsBlock];
@@ -308,12 +313,12 @@
         self.contentView.frame = frame;
         self.contentView.safeAreaInsets = tempSettings.peripheryInsets;
         if(isiOS26) {
+            // FIXME: workaround only as this breaks animations; even so some apps still shows wrong status bar safe area.
             // iOS 26.x changed to some weird _UISceneSafeAreaSettingsExtension API which only works with Liquid Glass-enabled apps for some reason, so we update via settings path here. iOS 27 fixes this so no need to apply there
             [self.presenter.scene updateSettingsWithBlock:^(UIMutableApplicationSceneSettings *settings) {
-                NSLog(@"P %@ S %@", NSStringFromUIEdgeInsets(tempSettings.peripheryInsets), NSStringFromUIEdgeInsets(tempSettings.safeAreaInsetsPortrait));
                 settings.peripheryInsets = tempSettings.peripheryInsets;
                 settings.safeAreaInsetsPortrait = tempSettings.safeAreaInsetsPortrait;
-                //settings.frame = tempSettings.frame;
+                settings.frame = tempSettings.frame;
             }];
         }
     } else {
@@ -336,7 +341,7 @@
         if(self.sceneID) {
             [[PrivClass(FBSceneManager) sharedInstance] destroyScene:self.sceneID withTransitionContext:nil];
         }
-        if(self->_hostingController) {
+        if(self.usesHostingControllerAPI) {
             if(@available(iOS 17.0, *)) {
                 [self.hostingController invalidate];
                 [self.hostingController.sceneViewController removeFromParentViewController];
@@ -392,6 +397,10 @@
         context.actions = [NSSet setWithObject:action];
         return context;
     }];
+}
+
+- (BOOL)usesHostingControllerAPI {
+    return _hostingController != nil;
 }
 
 @end

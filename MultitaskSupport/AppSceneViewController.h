@@ -28,7 +28,7 @@ API_AVAILABLE(ios(16.0))
 @property(nonatomic) int pid;
 @property(nonatomic) id<AppSceneViewControllerDelegate> delegate;
 @property(nonatomic) BOOL isAppRunning;
-@property(nonatomic) BOOL shouldSkipDebounceOnce;
+@property(nonatomic) BOOL shouldIgnoreSceneUpdates, shouldSkipDebounceOnce;
 @property(nonatomic) CGFloat scaleRatio;
 @property(nonatomic) UIView* contentView;
 @property(nonatomic) _UIScenePresenter *presenter;
@@ -41,5 +41,6 @@ API_AVAILABLE(ios(16.0))
 - (void)terminate;
 - (void)openURLScheme:(NSString *)urlString;
 - (void)handleStatusBarTapAction:(UIAction *)action;
+- (BOOL)usesHostingControllerAPI;
 @end
 
