@@ -8,18 +8,6 @@
 #import "../LiveContainer/Localization.h"
 #import "utils.h"
 
-static int hook_return_2(void) {
-    return 2;
-}
-__attribute__((constructor))
-void UIKitFixesInit(void) {
-    // Fix _UIPrototypingMenuSlider not continually updating its value on iOS 17+
-    Class _UIFluidSliderInteraction = objc_getClass("_UIFluidSliderInteraction");
-    if(_UIFluidSliderInteraction) {
-        method_setImplementation(class_getInstanceMethod(_UIFluidSliderInteraction, @selector(_state)), (IMP)hook_return_2);
-    }
-}
-
 @interface DecoratedAppSceneViewController()
 @property(nonatomic) NSArray* activatedVerticalConstraints;
 @property(nonatomic) NSString* dataUUID;
@@ -234,7 +222,11 @@ void UIKitFixesInit(void) {
 - (void)scaleSliderChanged:(_UIPrototypingMenuSlider *)slider {
     self.scaleRatio = slider.value;
     self.appSceneVC.scaleRatio = _scaleRatio;
-    self.appSceneVC.contentView.layer.sublayerTransform = CATransform3DMakeScale(_scaleRatio, _scaleRatio, 1.0);
+    if(self.appSceneVC.usesHostingControllerAPI) {
+        self.appSceneVC.contentView.transform = CGAffineTransformMakeScale(_scaleRatio, _scaleRatio);
+    } else {
+        self.appSceneVC.contentView.layer.sublayerTransform = CATransform3DMakeScale(_scaleRatio, _scaleRatio, 1.0);
+    }
     __weak typeof(self) weakSelf = self;
     [self.appSceneVC updateFrameWithSettingsBlock:^(UIMutableApplicationSceneSettings *settings) {
         if(weakSelf.isMaximized) {
@@ -381,11 +373,6 @@ void UIKitFixesInit(void) {
 }
 
 - (void)appSceneVCWillActivateScene:(AppSceneViewController *)vc {
-    if(@available(iOS 17.0, *)) {
-        if(vc.hostingController) {
-            [vc.contentView _setSafeAreaInsetsFrozen:YES updateForUnfreeze:NO];
-        }
-    }
     // Set up initial settings such as frame, safe area, etc
     [self appSceneVC:vc didUpdateFromSettings:vc.presenter.scene.settings.mutableCopy transitionContext:nil lifecycleActionType:0];
 }
@@ -402,7 +389,7 @@ void UIKitFixesInit(void) {
         } else {
             [self updateWindowedFrameWithSettings:settings];
         }
-        CGRect newFrame = CGRectMake(0, 0, self.view.frame.size.width/self.scaleRatio, (self.view.frame.size.height - self.navigationBar.frame.size.height)/self.scaleRatio);
+        CGRect newFrame = CGRectMake(0, 0, self.view.bounds.size.width, self.view.bounds.size.height - self.navigationBar.frame.size.height/self.scaleRatio);
         
         if(UIInterfaceOrientationIsLandscape(baseSettings.interfaceOrientation)) {
             settings.frame = CGRectMake(0, 0, newFrame.size.height, newFrame.size.width);
@@ -561,17 +548,7 @@ void UIKitFixesInit(void) {
         if(UIInterfaceOrientationIsLandscape(currentOrientation)) {
             safeAreaInsets.top = 0;
         }
-        switch(currentOrientation) {
-            case UIInterfaceOrientationLandscapeLeft:
-                settings.safeAreaInsetsPortrait = UIEdgeInsetsMake(settings.peripheryInsets.left, 0, settings.peripheryInsets.right, settings.peripheryInsets.bottom);
-                break;
-            case UIInterfaceOrientationLandscapeRight:
-                settings.safeAreaInsetsPortrait = UIEdgeInsetsMake(settings.peripheryInsets.left, settings.peripheryInsets.bottom, settings.peripheryInsets.right, 0);
-                break;
-            default:
-                settings.safeAreaInsetsPortrait = UIEdgeInsetsMake(settings.peripheryInsets.top, settings.peripheryInsets.left, settings.peripheryInsets.bottom, settings.peripheryInsets.right);
-                break;
-        }
+        settings.safeAreaInsetsPortrait = LCUIEdgeInsetsRotateToOrientation(settings.peripheryInsets, currentOrientation);
 
     } else {
         settings.safeAreaInsetsPortrait = UIEdgeInsetsMake(settings.peripheryInsets.top, settings.peripheryInsets.left, settings.peripheryInsets.bottom, settings.peripheryInsets.right);

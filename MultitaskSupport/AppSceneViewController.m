@@ -131,6 +131,9 @@
         settings.statusBarDisabled = !self.isNativeWindow;
         //settings.previewMaximumSize =
         //settings.deviceOrientationEventsEnabled = YES;
+        if(!self.usesHostingControllerAPI) {
+            settings.safeAreaInsetsPortrait = self.view.safeAreaInsets;
+        }
     };
     void (^updateSceneClientSettings)(id) = ^void(UIMutableApplicationSceneClientSettings *clientSettings) {
         clientSettings.interfaceOrientation = UIInterfaceOrientationPortrait;
@@ -258,7 +261,11 @@
         [self updateSettingsWithBlock:^(UIMutableApplicationSceneSettings *settings) {
             settings.deviceOrientation = UIDevice.currentDevice.orientation;
             settings.interfaceOrientation = self.view.window.windowScene.interfaceOrientation;
-            CGRect frame = CGRectMake(self.view.frame.origin.x, self.view.frame.origin.y, self.view.frame.size.width / self.scaleRatio, self.view.frame.size.height / self.scaleRatio);
+            CGRect frame = self.view.frame;
+            if(!self.usesHostingControllerAPI) {
+                frame.size.width /= self.scaleRatio;
+                frame.size.height /= self.scaleRatio;
+            }
             if(UIInterfaceOrientationIsLandscape(settings.interfaceOrientation)) {
                 CGSize size = frame.size;
                 frame.size.width = size.height;
@@ -296,7 +303,6 @@
     if(!tempSettings) {
         tempSettings = [UIMutableApplicationSceneSettings new];
     }
-    tempSettings.peripheryInsets = self.contentView.safeAreaInsets;
     updateSettingsBlock(tempSettings);
     CGRect frame = tempSettings.frame;
     if(UIInterfaceOrientationIsLandscape(tempSettings.interfaceOrientation)) {
@@ -309,20 +315,9 @@
         // Discard position
         frame.origin = CGPointZero;
         self.contentView.frame = frame;
-        self.contentView.safeAreaInsets = tempSettings.peripheryInsets;
-        if(isiOS26) {
-            // FIXME: workaround only as this breaks animations; even so some apps still shows wrong status bar safe area.
-            // iOS 26.x changed to some weird _UISceneSafeAreaSettingsExtension API which only works with Liquid Glass-enabled apps for some reason, so we update via settings path here. iOS 27 fixes this so no need to apply there
-            [self.presenter.scene updateSettingsWithBlock:^(UIMutableApplicationSceneSettings *settings) {
-                settings.peripheryInsets = tempSettings.peripheryInsets;
-                settings.safeAreaInsetsPortrait = tempSettings.safeAreaInsetsPortrait;
-                settings.frame = tempSettings.frame;
-            }];
-        }
     } else {
-        // This method can be called while contentView is nil to set up initial frame and safe area
+        // This method can be called while contentView is nil to set up initial frame
         self.view.frame = frame;
-        self.view.safeAreaInsets = tempSettings.peripheryInsets;
     }
 }
 

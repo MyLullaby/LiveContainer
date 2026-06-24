@@ -108,8 +108,6 @@
 
 @interface UIView(private)
 - (UIViewController *)_viewDelegate;
-- (void)setSafeAreaInsets:(UIEdgeInsets)safeAreaInsets;
-- (void)_setSafeAreaInsetsFrozen:(BOOL)frozen updateForUnfreeze:(BOOL)unfreeze API_AVAILABLE(ios(17.0));
 @end
 
 

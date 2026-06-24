@@ -157,6 +157,7 @@ extern const UIApplication *UIApp;
 @property(nonatomic, strong, readwrite) NSString *persistenceIdentifier;
 @property (nonatomic, assign, readwrite) UIEdgeInsets peripheryInsets;
 @property (nonatomic, assign, readwrite) UIEdgeInsets safeAreaInsetsPortrait, safeAreaInsetsPortraitUpsideDown, safeAreaInsetsLandscapeLeft, safeAreaInsetsLandscapeRight;
+@property (nonatomic, assign, readwrite) UIEdgeInsets safeAreaEdgeInsets API_AVAILABLE(ios(19.0));
 @property(assign, nonatomic, readwrite) UIUserInterfaceStyle userInterfaceStyle;
 @property(assign, nonatomic, readwrite) UIDeviceOrientation deviceOrientation;
 @property (nonatomic, strong, readwrite) BSCornerRadiusConfiguration *cornerRadiusConfiguration;
@@ -202,6 +203,10 @@ extern const UIApplication *UIApp;
 @protocol _UISceneSettingsDiffAction<NSObject>
 @required
 - (void)_performActionsForUIScene:(UIScene *)scene withUpdatedFBSScene:(id)fbsScene settingsDiff:(FBSSceneSettingsDiff *)diff fromSettings:(id)settings transitionContext:(id)context lifecycleActionType:(uint32_t)actionType;
+@end
+
+API_AVAILABLE(ios(17.0))
+@interface _UIFluidSliderInteraction : NSObject
 @end
 
 @interface UIImage(internal)
@@ -290,6 +295,7 @@ API_AVAILABLE(ios(17.4))
 
 API_AVAILABLE(ios(17.0))
 @interface _UISceneHostingView : UIView
+- (id)_remoteSheetProvider;
 - (_UIScenePresenter *)_scenePresenter;
 - (void)_applyOverridesToHostedSceneSettings:(UIMutableApplicationSceneSettings *)settings;
 - (void)applyViewGeometryToSettings:(UIMutableApplicationSceneSettings *)settings API_AVAILABLE(ios(19.0));
@@ -313,3 +319,6 @@ API_AVAILABLE(ios(17.4)) // 17.0
 //@property(nonatomic) BOOL requestEventDeferralForAllFirstResponderChanges;
 - (void)setFirstResponderTrackingSelectionPath:(UIViewController *)path API_AVAILABLE(ios(27.0));
 @end
+
+// Not really private ones
+UIEdgeInsets LCUIEdgeInsetsRotateToOrientation(UIEdgeInsets insets, UIInterfaceOrientation orientation);
