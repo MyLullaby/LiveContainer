@@ -176,11 +176,9 @@
             
             deferringComponent.grantBehavior = 2;
             deferringComponent.selectionRequestBehavior = 2;
-        } else {
-            /// UIKitCore`-[_UISceneHostingController createSceneWithConfiguration:]
-            /// Lower iOS uses _UISceneHostingEventDeferringExtension. Maybe setting this is optional
-            deferringComponent.requestEventDeferralForAllFirstResponderChanges = YES;
         }
+        /// UIKitCore`-[_UISceneHostingController createSceneWithConfiguration:]
+        /// Lower iOS uses _UISceneHostingEventDeferringExtension, no further setup needed
         
         // Now it's time to get the initial settings from decorated VC
         [self.delegate appSceneVCWillActivateScene:self];

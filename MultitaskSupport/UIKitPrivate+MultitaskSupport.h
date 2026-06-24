@@ -291,6 +291,8 @@ API_AVAILABLE(ios(17.4))
 API_AVAILABLE(ios(17.0))
 @interface _UISceneHostingView : UIView
 - (_UIScenePresenter *)_scenePresenter;
+- (void)_applyOverridesToHostedSceneSettings:(UIMutableApplicationSceneSettings *)settings;
+- (void)applyViewGeometryToSettings:(UIMutableApplicationSceneSettings *)settings API_AVAILABLE(ios(19.0));
 @end
 API_AVAILABLE(ios(17.0))
 @interface _UISceneHostingController : NSObject
@@ -307,7 +309,7 @@ API_AVAILABLE(ios(17.4)) // 17.0
 @interface _UISceneEventDeferringHostComponent : NSObject
 @property(nonatomic) NSInteger grantBehavior API_AVAILABLE(ios(27.0));
 @property(nonatomic) NSInteger selectionRequestBehavior API_AVAILABLE(ios(27.0));
-@property(nonatomic) BOOL maintainHostFirstResponderWhenClientWantsKeyboard;
-@property(nonatomic) BOOL requestEventDeferralForAllFirstResponderChanges;
+//@property(nonatomic) BOOL maintainHostFirstResponderWhenClientWantsKeyboard;
+//@property(nonatomic) BOOL requestEventDeferralForAllFirstResponderChanges;
 - (void)setFirstResponderTrackingSelectionPath:(UIViewController *)path API_AVAILABLE(ios(27.0));
 @end
