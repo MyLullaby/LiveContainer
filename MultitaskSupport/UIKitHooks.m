@@ -29,7 +29,7 @@ API_AVAILABLE(ios(17.0))
 }
 @end
 
-/// Hook to fix safe area scaling and orientation. We use superview's safeAreaInsets because self one tends to bug out with certain scaling, and also allows us to customize safe are while in PiP mode (currently zero)
+/// Hook to fix safe area scaling and orientation. We use superview's safeAreaInsets because self one tends to bug out with certain scaling, and also allows us to customize safe area while in PiP mode later on
 API_AVAILABLE(ios(17.0))
 @implementation _UISceneHostingView(LCFixSafeArea)
 - (void)hook__applyOverridesToHostedSceneSettings:(UIMutableApplicationSceneSettings *)settings {

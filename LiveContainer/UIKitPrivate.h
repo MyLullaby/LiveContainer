@@ -108,6 +108,7 @@
 
 @interface UIView(private)
 - (UIViewController *)_viewDelegate;
+- (void)setSafeAreaInsets:(UIEdgeInsets)safeAreaInsets;
 @end
 
 
