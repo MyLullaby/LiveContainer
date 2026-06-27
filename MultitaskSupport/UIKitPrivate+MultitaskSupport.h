@@ -9,6 +9,7 @@
 #import "UIKitPrivate.h"
 
 #define PrivClass(NAME) NSClassFromString(@#NAME)
+extern const UIApplication *UIApp;
 
 @interface LSResourceProxy : NSObject
     @property (setter=_setLocalizedName:,nonatomic,copy) NSString *localizedName;
@@ -156,6 +157,7 @@
 @property(nonatomic, strong, readwrite) NSString *persistenceIdentifier;
 @property (nonatomic, assign, readwrite) UIEdgeInsets peripheryInsets;
 @property (nonatomic, assign, readwrite) UIEdgeInsets safeAreaInsetsPortrait, safeAreaInsetsPortraitUpsideDown, safeAreaInsetsLandscapeLeft, safeAreaInsetsLandscapeRight;
+@property (nonatomic, assign, readwrite) UIEdgeInsets safeAreaEdgeInsets API_AVAILABLE(ios(19.0));
 @property(assign, nonatomic, readwrite) UIUserInterfaceStyle userInterfaceStyle;
 @property(assign, nonatomic, readwrite) UIDeviceOrientation deviceOrientation;
 @property (nonatomic, strong, readwrite) BSCornerRadiusConfiguration *cornerRadiusConfiguration;
@@ -170,7 +172,7 @@
 - (void)setFrame:(CGRect)frame;
 - (void)setLevel:(NSInteger)level;
 - (void)setStatusBarDisabled:(BOOL)disabled;
-- (void)setInterfaceOrientation:(NSInteger)o;
+- (void)setInterfaceOrientation:(UIInterfaceOrientation)o;
 - (BSSettings *)otherSettings;
 @end
 
@@ -201,6 +203,10 @@
 @protocol _UISceneSettingsDiffAction<NSObject>
 @required
 - (void)_performActionsForUIScene:(UIScene *)scene withUpdatedFBSScene:(id)fbsScene settingsDiff:(FBSSceneSettingsDiff *)diff fromSettings:(id)settings transitionContext:(id)context lifecycleActionType:(uint32_t)actionType;
+@end
+
+API_AVAILABLE(ios(17.0))
+@interface _UIFluidSliderInteraction : NSObject
 @end
 
 @interface UIImage(internal)
@@ -243,6 +249,7 @@
 @property(nonatomic, assign, readonly) FBScene *scene;
 - (instancetype)initWithOwner:(_UIScenePresenterOwner *)manager identifier:(NSString *)scene sortContext:(NSNumber *)context;
 - (void)modifyPresentationContext:(void(^)(UIMutableScenePresentationContext *context))block;
+- (BOOL)isActive;
 - (void)activate;
 - (void)deactivate;
 - (void)invalidate;
@@ -286,18 +293,21 @@ API_AVAILABLE(ios(17.4))
 - (instancetype)initWithProcessIdentity:(RBSProcessIdentity *)identity;
 @end
 
-API_AVAILABLE(ios(17.4)) // 17.0
+API_AVAILABLE(ios(17.0))
 @interface _UISceneHostingView : UIView
+- (id)_remoteSheetProvider;
 - (_UIScenePresenter *)_scenePresenter;
+- (void)_applyOverridesToHostedSceneSettings:(UIMutableApplicationSceneSettings *)settings;
+- (void)applyViewGeometryToSettings:(UIMutableApplicationSceneSettings *)settings API_AVAILABLE(ios(19.0));
 @end
-API_AVAILABLE(ios(17.4)) // 17.0
+API_AVAILABLE(ios(17.0))
 @interface _UISceneHostingController : NSObject
 - (instancetype)initWithAdvancedConfiguration:(_UISceneHostingControllerAdvancedConfiguration *)config API_AVAILABLE(ios(17.4));
-- (instancetype)initWithProcessIdentity:(RBSProcessIdentity *)identity sceneSpecification:(FBSSceneSpecification *)spec;
-- (_UISceneEventDeferringHostComponent *)_eventDeferringComponent;
-- (_UISceneHostingView *)sceneView;
-- (UIViewController *)sceneViewController;
-- (void)invalidate;
+//- (instancetype)initWithProcessIdentity:(RBSProcessIdentity *)identity sceneSpecification:(FBSSceneSpecification *)spec API_AVAILABLE(ios(17.0));
+- (_UISceneEventDeferringHostComponent *)_eventDeferringComponent API_AVAILABLE(ios(17.4));
+- (_UISceneHostingView *)sceneView API_AVAILABLE(ios(17.0));
+- (UIViewController *)sceneViewController; // API_AVAILABLE(ios(17.0))
+- (void)invalidate; // API_AVAILABLE(ios(17.0))
 @end
 
 API_AVAILABLE(ios(17.4)) // 17.0
@@ -305,7 +315,10 @@ API_AVAILABLE(ios(17.4)) // 17.0
 @interface _UISceneEventDeferringHostComponent : NSObject
 @property(nonatomic) NSInteger grantBehavior API_AVAILABLE(ios(27.0));
 @property(nonatomic) NSInteger selectionRequestBehavior API_AVAILABLE(ios(27.0));
-@property(nonatomic) BOOL maintainHostFirstResponderWhenClientWantsKeyboard;
-@property(nonatomic) BOOL requestEventDeferralForAllFirstResponderChanges;
+//@property(nonatomic) BOOL maintainHostFirstResponderWhenClientWantsKeyboard;
+//@property(nonatomic) BOOL requestEventDeferralForAllFirstResponderChanges;
 - (void)setFirstResponderTrackingSelectionPath:(UIViewController *)path API_AVAILABLE(ios(27.0));
 @end
+
+// Not really private ones
+UIEdgeInsets LCUIEdgeInsetsRotateToOrientation(UIEdgeInsets insets, UIInterfaceOrientation orientation);

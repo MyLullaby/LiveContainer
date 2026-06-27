@@ -15,13 +15,13 @@
 
 @interface AppSceneViewController()
 @property int resizeDebounceToken;
+@property CFTimeInterval lastResizeRequestTime;
 @property CGPoint normalizedOrigin;
 @property bool isNativeWindow;
 @property NSUUID* identifier;
 @end
 
 @interface AppSceneViewController()
-@property(nonatomic) API_AVAILABLE(ios(17.0)) _UISceneHostingController *hostingController;
 @property(nonatomic) UIWindowScene *hostScene;
 @property(nonatomic) NSString *sceneID;
 @property(nonatomic) NSExtension* extension;
@@ -33,12 +33,13 @@
 
 - (instancetype)initWithBundleId:(NSString*)bundleId dataUUID:(NSString*)dataUUID delegate:(id<AppSceneViewControllerDelegate>)delegate {
     self = [super initWithNibName:nil bundle:nil];
-    self.view = [[UIView alloc] init];
     self.delegate = delegate;
     self.dataUUID = dataUUID;
     self.bundleId = bundleId;
     self.scaleRatio = 1.0;
     self.isAppTerminationCleanUpCalled = false;
+    self.isNativeWindow = [NSUserDefaults.lcSharedDefaults integerForKey:@"LCMultitaskMode" ] == 1;
+    
     // init extension
     NSError* error = nil;
     _extension = [NSExtension extensionWithIdentifier:LCUtils.liveProcessBundleIdentifier error:&error];
@@ -108,10 +109,6 @@
         }
     }];
     
-    
-
-    _isNativeWindow = [NSUserDefaults.lcSharedDefaults integerForKey:@"LCMultitaskMode" ] == 1;
-
     return self;
 }
 
@@ -128,28 +125,15 @@
         settings.cornerRadiusConfiguration = [[PrivClass(BSCornerRadiusConfiguration) alloc] initWithTopLeft:self.view.layer.cornerRadius bottomLeft:self.view.layer.cornerRadius bottomRight:self.view.layer.cornerRadius topRight:self.view.layer.cornerRadius];
         settings.displayConfiguration = UIScreen.mainScreen.displayConfiguration;
         settings.foreground = YES;
-        
-        settings.deviceOrientation = UIDevice.currentDevice.orientation;
-        settings.interfaceOrientation = UIApplication.sharedApplication.statusBarOrientation;
-        if(UIInterfaceOrientationIsLandscape(settings.interfaceOrientation)) {
-            settings.frame = CGRectMake(0, 0, self.view.frame.size.height, self.view.frame.size.width);
-        } else {
-            settings.frame = CGRectMake(0, 0, self.view.frame.size.width, self.view.frame.size.height);
-        }
         //settings.interruptionPolicy = 2; // reconnect
         settings.level = 1;
         settings.persistenceIdentifier = self.dataUUID;
-        if(self.isNativeWindow) {
-            UIEdgeInsets defaultInsets = self.view.window.safeAreaInsets;
-            settings.peripheryInsets = defaultInsets;
-            settings.safeAreaInsetsPortrait = defaultInsets;
-        }
-        
         settings.statusBarDisabled = !self.isNativeWindow;
         //settings.previewMaximumSize =
         //settings.deviceOrientationEventsEnabled = YES;
-        
-        self.settings = settings;
+        if(!self.usesHostingControllerAPI) {
+            settings.safeAreaInsetsPortrait = self.view.safeAreaInsets;
+        }
     };
     void (^updateSceneClientSettings)(id) = ^void(UIMutableApplicationSceneClientSettings *clientSettings) {
         clientSettings.interfaceOrientation = UIInterfaceOrientationPortrait;
@@ -167,7 +151,13 @@
             ]];
         }
         self.hostingController = [[_UISceneHostingController alloc] initWithAdvancedConfiguration:config];
-        FBScene *scene = [self.hostingController valueForKey:@"_fbScene"];
+        /// !! do NOT use self.hostingController.sceneView here as it breaks keyboard focus on iOS 26 below. I have no idea why this happens even though both return the same object. Maybe sceneView didn't initialize its ViewController properly?
+        self.contentView = self.hostingController.sceneViewController.view;
+        self.contentView.clipsToBounds = NO;
+        // _scenePresenter was a property in 26, but made only ivar in 27
+        self.presenter = [self.contentView valueForKey:@"_scenePresenter"];
+        self.sceneID = self.presenter.identifier;
+        FBScene *scene = self.presenter.scene;
         [scene configureParameters:^(FBSMutableSceneParameters *parameters) {
             [parameters updateSettingsWithBlock:updateSceneSettings];
             [parameters updateClientSettingsWithBlock:updateSceneClientSettings];
@@ -189,21 +179,13 @@
             
             deferringComponent.grantBehavior = 2;
             deferringComponent.selectionRequestBehavior = 2;
-        } else {
-            /// UIKitCore`-[_UISceneHostingController createSceneWithConfiguration:]
-            /// Lower iOS uses _UISceneHostingEventDeferringExtension. Maybe setting this is optional
-            deferringComponent.requestEventDeferralForAllFirstResponderChanges = YES;
         }
+        /// UIKitCore`-[_UISceneHostingController createSceneWithConfiguration:]
+        /// Lower iOS uses _UISceneHostingEventDeferringExtension, no further setup needed
         
+        // Now it's time to get the initial settings from decorated VC
+        [self.delegate appSceneVCWillActivateScene:self];
         [self addChildViewController:self.hostingController.sceneViewController];
-        // _scenePresenter was a property in 26, but made only ivar in 27
-        self.presenter = [self.hostingController.sceneView valueForKey:@"_scenePresenter"];
-        self.sceneID = self.presenter.identifier;
-        
-        self.contentView = self.hostingController.sceneViewController.view;
-        self.contentView.clipsToBounds = NO;
-        self.contentView.frame = self.settings.frame;
-        self.contentView.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
     } else {
         self.sceneID = [NSString stringWithFormat:@"sceneID:%@-%@", @"LiveProcess", self.dataUUID];
         FBSMutableSceneDefinition *definition = [PrivClass(FBSMutableSceneDefinition) definition];
@@ -261,43 +243,82 @@
     UIMutableApplicationSceneSettings *baseSettings = [diff settingsByApplyingToMutableCopyOfSettings:settings];
     UIApplicationSceneTransitionContext *newContext = [context copy];
     newContext.actions = nil;
-    if(self.isNativeWindow) {
-        // directly update the settings
-        baseSettings.interruptionPolicy = 0;
-        baseSettings.peripheryInsets = self.view.window.safeAreaInsets;
-        [self.presenter.scene updateSettings:baseSettings withTransitionContext:newContext completion:nil];
-    } else {
-        [self.delegate appSceneVC:self didUpdateFromSettings:baseSettings transitionContext:newContext];
-    }
+    [self.delegate appSceneVC:self didUpdateFromSettings:baseSettings transitionContext:newContext lifecycleActionType:actionType];
 }
 
 - (void)viewWillLayoutSubviews {
-    [self updateFrameWithSettingsBlock:self.nextUpdateSettingsBlock];
-    self.nextUpdateSettingsBlock = nil;
+    /// For native window we let iPadOS handle it however it wants, which is usually live resize (autoresizingMask set in appSceneVCWillActivateScene)
+    if(_contentView.autoresizingMask != (UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight)) {
+        [self updateFrameWithSettingsBlock:nil];
+    }
 }
 - (void)updateFrameWithSettingsBlock:(void (^)(UIMutableApplicationSceneSettings *settings))block {
-    __block int currentDebounceToken = self.resizeDebounceToken + 1;
-    _resizeDebounceToken = currentDebounceToken;
-    dispatch_time_t delay = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC));
-    dispatch_after(delay, dispatch_get_main_queue(), ^{
+    __block int currentDebounceToken = ++_resizeDebounceToken;
+    dispatch_block_t queueBlock = ^{
         if(currentDebounceToken != self.resizeDebounceToken) {
             return;
         }
-        CGRect frame = CGRectMake(self.view.frame.origin.x, self.view.frame.origin.y, self.view.frame.size.width / self.scaleRatio, self.view.frame.size.height / self.scaleRatio);
-        [self.presenter.scene updateSettingsWithBlock:^(UIMutableApplicationSceneSettings *settings) {
+        [self updateSettingsWithBlock:^(UIMutableApplicationSceneSettings *settings) {
             settings.deviceOrientation = UIDevice.currentDevice.orientation;
             settings.interfaceOrientation = self.view.window.windowScene.interfaceOrientation;
-            if(UIInterfaceOrientationIsLandscape(settings.interfaceOrientation)) {
-                CGRect frame2 = CGRectMake(frame.origin.x, frame.origin.y, frame.size.height, frame.size.width);
-                settings.frame = frame2;
-            } else {
-                settings.frame = frame;
+            CGRect frame = self.view.frame;
+            if(!self.usesHostingControllerAPI) {
+                frame.size.width /= self.scaleRatio;
+                frame.size.height /= self.scaleRatio;
             }
+            if(UIInterfaceOrientationIsLandscape(settings.interfaceOrientation)) {
+                CGSize size = frame.size;
+                frame.size.width = size.height;
+                frame.size.height = size.width;
+            }
+            settings.frame = frame;
             if(block) {
                 block(settings);
             }
         }];
-    });
+    };
+    if(_shouldSkipDebounceOnce) {
+        _shouldSkipDebounceOnce = NO;
+        queueBlock();
+    } else {
+        dispatch_time_t delay = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC));
+        dispatch_after(delay, dispatch_get_main_queue(), queueBlock);
+    }
+}
+- (void)updateSettingsWithBlock:(void(^)(UIMutableApplicationSceneSettings *settings))updateSettingsBlock {
+    if(_shouldIgnoreSceneUpdates) {
+        // Ignore all updates when in PiP mode
+        return;
+    }
+    
+    if(!_hostingController && self.contentView) {
+        // Legacy path
+        [self.presenter.scene updateSettingsWithBlock:updateSettingsBlock];
+        return;
+    }
+    
+    /// iOS 17.4 path, most are automatically handled by setting values to _UISceneHostingViewController
+    /// This is also reachable on legacy path when contentView is nil during early setup
+    UIMutableApplicationSceneSettings *tempSettings = [self.presenter.scene.settings mutableCopy];
+    if(!tempSettings) {
+        tempSettings = [UIMutableApplicationSceneSettings new];
+    }
+    updateSettingsBlock(tempSettings);
+    CGRect frame = tempSettings.frame;
+    if(UIInterfaceOrientationIsLandscape(tempSettings.interfaceOrientation)) {
+        frame = CGRectMake(frame.origin.x, frame.origin.y, frame.size.height, frame.size.width);
+    }
+    
+    if (self.contentView) {
+        BOOL isiOS26 = NO;
+        if(@available(iOS 19.0, *)) { if(@available(iOS 27.0, *)) {} else isiOS26 = YES; }
+        // Discard position
+        frame.origin = CGPointZero;
+        self.contentView.frame = frame;
+    } else {
+        // This method can be called while contentView is nil to set up initial frame
+        self.view.frame = frame;
+    }
 }
 
 - (BOOL)isAppRunning {
@@ -313,10 +334,12 @@
         if(self.sceneID) {
             [[PrivClass(FBSceneManager) sharedInstance] destroyScene:self.sceneID withTransitionContext:nil];
         }
-        if(@available(iOS 17.4, *)) {
-            [self.hostingController invalidate];
-            [self.hostingController.sceneViewController removeFromParentViewController];
-            self.hostingController = nil;
+        if(self.usesHostingControllerAPI) {
+            if(@available(iOS 17.0, *)) {
+                [self.hostingController invalidate];
+                [self.hostingController.sceneViewController removeFromParentViewController];
+                self.hostingController = nil;
+            }
         } else if(self.presenter){
             [self.presenter deactivate];
             [self.presenter invalidate];
@@ -367,6 +390,10 @@
         context.actions = [NSSet setWithObject:action];
         return context;
     }];
+}
+
+- (BOOL)usesHostingControllerAPI {
+    return _hostingController != nil;
 }
 
 @end
