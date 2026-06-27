@@ -548,7 +548,19 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     
     // Preload executable to bypass RT_NOLOAD
     appMainImageIndex = _dyld_image_count();
-    void *appHandle = dlopen_nolock(appExecPath, RTLD_LAZY|RTLD_GLOBAL|RTLD_FIRST);
+    __block void *appHandle = 0;
+    void (^dlopenBlock)(void) = ^{
+        appHandle = dlopen_nolock(appExecPath, RTLD_LAZY|RTLD_GLOBAL|RTLD_FIRST);
+    };
+    
+    BOOL is27up = false;
+    if(@available(iOS 27, *)) { is27up = true; }
+    if(is27up && [guestAppInfo[@"segCountMismatch"] boolValue]) {
+        bypass_seg_count_check(dlopenBlock);
+    } else {
+        dlopenBlock();
+    }
+
     appExecutableHandle = appHandle;
     const char *dlerr = dlerror();
     

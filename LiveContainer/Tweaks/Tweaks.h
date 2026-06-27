@@ -28,5 +28,6 @@ void* getDSCAddr(void);
 void* getCachedSymbol(NSString* symbolName, struct mach_header_64* header);
 void saveCachedSymbol(NSString* symbolName, struct mach_header_64* header, uint64_t offset);
 void* dlopen_nolock(const char *path, int mode);
+void bypass_seg_count_check(void (^block)(void));
 
 static void hook_do_nothing(void) {}
