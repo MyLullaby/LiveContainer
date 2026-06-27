@@ -177,17 +177,17 @@ void overwriteMainNSBundle(NSBundle *newBundle) {
     assert(![NSBundle.mainBundle.executablePath isEqualToString:oldPath]);
 }
 
-int hook__NSGetExecutablePath_overwriteExecPath(char*** dyldApiInstancePtr, char* newPath, uint32_t* bufsize) {
+int hook__NSGetExecutablePath_overwriteExecPath(void* dyldApiInstancePtr, char* newPath, uint32_t* bufsize) {
     assert(dyldApiInstancePtr != 0);
-    char** dyldConfig = dyldApiInstancePtr[1];
+    void* dyldConfig = *(void**)(dyldApiInstancePtr + 0x8);
     assert(dyldConfig != 0);
     
     char** mainExecutablePathPtr = 0;
     // mainExecutablePath is at 0x10 for iOS 15~18.3.2, 0x20 for iOS 18.4+
-    if(dyldConfig[2] != 0 && dyldConfig[2][0] == '/') {
-        mainExecutablePathPtr = dyldConfig + 2;
-    } else if (dyldConfig[4] != 0 && dyldConfig[4][0] == '/') {
-        mainExecutablePathPtr = dyldConfig + 4;
+    if(*(char**)(dyldConfig + 0x10) != 0 && (*(char**)dyldConfig + 0x10)[0] == '/') {
+        mainExecutablePathPtr = dyldConfig + 0x10;
+    } else if (*(char**)(dyldConfig + 0x20) != 0 && (*(char**)(dyldConfig + 0x20))[0] == '/') {
+        mainExecutablePathPtr = dyldConfig + 0x20;
     } else {
         assert(mainExecutablePathPtr != 0);
     }
@@ -198,6 +198,12 @@ int hook__NSGetExecutablePath_overwriteExecPath(char*** dyldApiInstancePtr, char
         os_thread_self_restrict_tpro_to_rw();
     }
     *mainExecutablePathPtr = newPath;
+    
+    // in iOS 27, the length is also cached, it's at +0x28
+    if(@available(iOS 27.0, *)) {
+        *(size_t*)(dyldConfig + 0x28) = strlen(newPath);
+    }
+    
     if(ret != KERN_SUCCESS) {
         os_thread_self_restrict_tpro_to_ro();
     }
