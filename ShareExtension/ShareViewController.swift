@@ -256,7 +256,7 @@ final class ShareExtensionViewModel: ObservableObject {
             return nil
         }
 
-        let iconURL = appURL.appendingPathComponent("LCAppIconLight.png")
+        let iconURL = iconURL(for: appURL)
         return ShareApp(
             id: "\(isShared ? "shared" : "private")|\(relativeBundlePath)",
             relativeBundlePath: relativeBundlePath,
@@ -267,8 +267,31 @@ final class ShareExtensionViewModel: ObservableObject {
             isLocked: appInfo["isLocked"] as? Bool ?? false,
             isJITNeeded: appInfo["isJITNeeded"] as? Bool ?? false,
             containers: usableContainers,
-            iconURL: FileManager.default.fileExists(atPath: iconURL.path) ? iconURL : nil
+            iconURL: iconURL
         )
+    }
+
+    private func iconURL(for appURL: URL) -> URL? {
+        let lightIconURL = appURL.appendingPathComponent("LCAppIconLight.png")
+        let darkIconURL = appURL.appendingPathComponent("LCAppIconDark.png")
+
+        let preferredIconURL: URL
+        let fallbackIconURL: URL
+        if #available(iOS 18.0, *), sharedDefaults?.bool(forKey: "darkModeIcon") == true {
+            preferredIconURL = darkIconURL
+            fallbackIconURL = lightIconURL
+        } else {
+            preferredIconURL = lightIconURL
+            fallbackIconURL = darkIconURL
+        }
+
+        if FileManager.default.fileExists(atPath: preferredIconURL.path) {
+            return preferredIconURL
+        }
+        if FileManager.default.fileExists(atPath: fallbackIconURL.path) {
+            return fallbackIconURL
+        }
+        return nil
     }
 
     private func loadContainers(appInfo: [String: Any], root: URL, isShared: Bool) -> [ShareContainer] {
@@ -539,6 +562,8 @@ struct ShareExtensionRootView: View {
             } message: {
                 Text(viewModel.errorMessage ?? "")
             }
+            .navigationTitle(Text("LiveContainer"))
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 
