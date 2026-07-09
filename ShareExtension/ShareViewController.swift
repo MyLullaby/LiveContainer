@@ -8,7 +8,7 @@ final class SharePayload: ObservableObject {
     enum Kind {
         case loading
         case url(URL)
-        case files([URL])
+        case file(URL)
         case empty
         case failed(String)
     }
@@ -22,6 +22,8 @@ final class SharePayload: ObservableObject {
         return nil
     }
 }
+
+private let shareFileBookmarkDefaultsKey = "LCLaunchExtensionFileBookmark"
 
 struct ShareContainer: Identifiable, Hashable {
     let id: String
@@ -337,23 +339,9 @@ final class ShareExtensionViewModel: ObservableObject {
         switch payload.kind {
         case .url(let url):
             return url.absoluteString
-        case .files(let fileURLs):
-            let inboxURL = item.container.containerURL.appendingPathComponent("Inbox")
-            let accessed = item.container.containerURL.startAccessingSecurityScopedResource()
-            defer {
-                if accessed {
-                    item.container.containerURL.stopAccessingSecurityScopedResource()
-                }
-            }
-
-            try FileManager.default.createDirectory(at: inboxURL, withIntermediateDirectories: true)
-            var copiedFiles: [URL] = []
-            for fileURL in fileURLs {
-                let destination = uniqueDestinationURL(in: inboxURL, fileName: fileURL.lastPathComponent)
-                try FileManager.default.copyItem(at: fileURL, to: destination)
-                copiedFiles.append(destination)
-            }
-            return copiedFiles.first?.absoluteString
+        case .file(let fileURL):
+            try storeBookmark(for: fileURL)
+            return fileURL.absoluteString
         case .empty:
             return nil
         case .loading:
@@ -363,17 +351,20 @@ final class ShareExtensionViewModel: ObservableObject {
         }
     }
 
-    private func uniqueDestinationURL(in directory: URL, fileName: String) -> URL {
-        let base = (fileName as NSString).deletingPathExtension
-        let ext = (fileName as NSString).pathExtension
-        var candidate = directory.appendingPathComponent(fileName)
-        var index = 1
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            let nextName = ext.isEmpty ? "\(base)-\(index)" : "\(base)-\(index).\(ext)"
-            candidate = directory.appendingPathComponent(nextName)
-            index += 1
+    private func storeBookmark(for fileURL: URL) throws {
+        let accessed = fileURL.startAccessingSecurityScopedResource()
+        defer {
+            if accessed {
+                fileURL.stopAccessingSecurityScopedResource()
+            }
         }
-        return candidate
+
+        let bookmark = try fileURL.bookmarkData(
+            options: URL.BookmarkCreationOptions(rawValue: 1 << 11),
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        sharedDefaults?.set(bookmark, forKey: shareFileBookmarkDefaultsKey)
     }
 
     private func buildLaunchURL(for item: ShareLaunchItem, launchURLString: String?) -> URL? {
@@ -771,40 +762,40 @@ enum ShareExtensionItemLoader {
             if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
                 let item = try await loadItem(provider: provider, typeIdentifier: UTType.url.identifier)
                 if let url = item as? URL {
-                    return .url(url)
+                    return url.isFileURL ? .file(url) : .url(url)
                 }
                 if let url = item as? NSURL {
-                    return .url(url as URL)
+                    let swiftURL = url as URL
+                    return swiftURL.isFileURL ? .file(swiftURL) : .url(swiftURL)
                 }
                 if let data = item as? Data, let string = String(data: data, encoding: .utf8), let url = URL(string: string) {
-                    return .url(url)
+                    return url.isFileURL ? .file(url) : .url(url)
                 }
                 if let string = item as? String, let url = URL(string: string) {
-                    return .url(url)
+                    return url.isFileURL ? .file(url) : .url(url)
                 }
             }
         }
 
-        var fileURLs: [URL] = []
         for provider in providers {
             if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
                 let item = try await loadItem(provider: provider, typeIdentifier: UTType.fileURL.identifier)
                 if let url = item as? URL {
-                    fileURLs.append(try copyToTemporaryShareLocation(url))
+                    return .file(url)
                 } else if let url = item as? NSURL {
-                    fileURLs.append(try copyToTemporaryShareLocation(url as URL))
+                    return .file(url as URL)
                 }
                 continue
             }
 
             if let typeIdentifier = provider.registeredTypeIdentifiers.first {
-                if let url = try await loadFileRepresentation(provider: provider, typeIdentifier: typeIdentifier) {
-                    fileURLs.append(try copyToTemporaryShareLocation(url))
+                if let url = try await loadInPlaceFileRepresentation(provider: provider, typeIdentifier: typeIdentifier) {
+                    return .file(url)
                 }
             }
         }
 
-        return fileURLs.isEmpty ? .empty : .files(fileURLs)
+        return .empty
     }
 
     private static func loadItem(provider: NSItemProvider, typeIdentifier: String) async throws -> NSSecureCoding {
@@ -823,35 +814,16 @@ enum ShareExtensionItemLoader {
         }
     }
 
-    private static func loadFileRepresentation(provider: NSItemProvider, typeIdentifier: String) async throws -> URL? {
+    private static func loadInPlaceFileRepresentation(provider: NSItemProvider, typeIdentifier: String) async throws -> URL? {
         try await withCheckedThrowingContinuation { continuation in
-            provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, error in
+            provider.loadInPlaceFileRepresentation(forTypeIdentifier: typeIdentifier) { url, inPlace, error in
                 if let error {
                     continuation.resume(throwing: error)
                     return
                 }
-                continuation.resume(returning: url)
+                continuation.resume(returning: inPlace ? url : nil)
             }
         }
-    }
-
-    private static func copyToTemporaryShareLocation(_ sourceURL: URL) throws -> URL {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("LiveContainerShareExtension", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let destination = directory.appendingPathComponent(sourceURL.lastPathComponent.isEmpty ? UUID().uuidString : sourceURL.lastPathComponent)
-        if FileManager.default.fileExists(atPath: destination.path) {
-            try FileManager.default.removeItem(at: destination)
-        }
-
-        let accessing = sourceURL.startAccessingSecurityScopedResource()
-        defer {
-            if accessing {
-                sourceURL.stopAccessingSecurityScopedResource()
-            }
-        }
-        try FileManager.default.copyItem(at: sourceURL, to: destination)
-        return destination
     }
 }
 
