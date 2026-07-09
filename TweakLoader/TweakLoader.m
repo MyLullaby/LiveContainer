@@ -34,23 +34,11 @@ static NSString *loadTweakAtURL(NSURL *url) {
     }
 }
 
-// Disabled tweaks/subfolders are recorded by name in TweakInfo.plist
-static NSArray<NSString *> *disabledItemsInFolder(NSURL *folderURL) {
-    NSURL *infoURL = [folderURL URLByAppendingPathComponent:@"TweakInfo.plist"];
-    NSDictionary *info = [NSDictionary dictionaryWithContentsOfURL:infoURL];
-    NSArray *disabled = info[@"disabled"];
-    if (![disabled isKindOfClass:NSArray.class]) {
-        return @[];
-    }
-    return disabled;
-}
-
 static void loadTweaksRecursively(NSURL *folderURL, NSMutableArray *errors) {
-    NSArray<NSString *> *disabled = disabledItemsInFolder(folderURL);
     NSArray<NSURL *> *items = [NSFileManager.defaultManager contentsOfDirectoryAtURL:folderURL includingPropertiesForKeys:@[NSURLIsDirectoryKey] options:0 error:nil];
     for (NSURL *fileURL in items) {
         NSString *name = fileURL.lastPathComponent;
-        if ([disabled containsObject:name]) {
+        if ([name hasSuffix:@".disabled"]) {
             NSLog(@"Skipping disabled tweak %@", name);
             continue;
         }
@@ -129,14 +117,13 @@ static void TweakLoaderConstructor() {
     // Load global tweaks
     NSLog(@"Loading tweaks from the global folder");
 
-    NSArray<NSString *> *globalDisabled = disabledItemsInFolder([NSURL fileURLWithPath:globalTweakFolder]);
     for (NSURL *fileURL in globalTweaks) {
         NSString *name = fileURL.lastPathComponent;
         if ([name isEqualToString:@"TweakLoader.dylib"]) {
             // skip loading myself
             continue;
         }
-        if ([globalDisabled containsObject:name]) {
+        if ([name hasSuffix:@".disabled"]) {
             NSLog(@"Skipping disabled global tweak %@", name);
             continue;
         }
@@ -146,8 +133,8 @@ static void TweakLoaderConstructor() {
         }
     }
 
-    // Load selected tweak folder, recursively. Honor it being disabled at the root level too.
-    if (tweakFolderName.length > 0 && ![globalDisabled containsObject:tweakFolderName]) {
+    // Load selected tweak folder, recursively
+    if (tweakFolderName.length > 0) {
         NSLog(@"Loading tweaks from the selected folder");
         NSString *tweakFolder = [globalTweakFolder stringByAppendingPathComponent:tweakFolderName];
         loadTweaksRecursively([NSURL fileURLWithPath:tweakFolder], errors);
