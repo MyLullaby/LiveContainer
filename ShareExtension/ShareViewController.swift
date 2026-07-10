@@ -137,7 +137,7 @@ final class ShareExtensionViewModel: ObservableObject {
 
     func launch(app: ShareApp, context: NSExtensionContext?) async {
         guard let container = app.primaryContainer else {
-            errorMessage = "No container is available."
+            errorMessage = "lc.shareExtension.error.noContainer".loc
             return
         }
         await launch(app: app, container: container, context: context)
@@ -433,10 +433,12 @@ final class ShareExtensionViewModel: ObservableObject {
     }
 
     private func builtInSideStoreIconURL() -> URL? {
-        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+        guard let privateDocURL else {
             return nil
         }
-        let iconCacheURL = caches.appendingPathComponent("BuiltInSideStoreIconCache", isDirectory: true)
+        let iconCacheURL = privateDocURL
+            .appendingPathComponent("SideStore/Library/Caches", isDirectory: true)
+            .appendingPathComponent("BuiltInSideStoreIconCache", isDirectory: true)
         let lightIconURL = iconCacheURL.appendingPathComponent("LCAppIconLight.png")
         let darkIconURL = iconCacheURL.appendingPathComponent("LCAppIconDark.png")
 
@@ -700,7 +702,7 @@ final class ShareExtensionViewModel: ObservableObject {
         }
 
         return try await withCheckedThrowingContinuation { continuation in
-            context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Authentication is required to show hidden apps.") { success, evaluationError in
+            context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "lc.utils.requireAuthentication".loc) { success, evaluationError in
                 if let evaluationError = evaluationError as? LAError, evaluationError.code == .userCancel || evaluationError.code == .appCancel {
                     continuation.resume(returning: false)
                 } else if let evaluationError {
@@ -736,17 +738,17 @@ struct ShareExtensionRootView: View {
                         VStack(spacing: 8) {
                             Image(systemName: "app")
                                 .font(.system(size: 28))
-                            Text("No available apps")
+                            Text("lc.appList.manageInPrimaryTip".loc)
                         }
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 32)
                     } else {
-                        appGridSection(title: "Apps", apps: regular, includesHiddenUnlockButton: showHiddenUnlockButton)
+                        appGridSection(title: "lc.tabView.apps".loc, apps: regular, includesHiddenUnlockButton: showHiddenUnlockButton)
                     }
 
                     if viewModel.hiddenUnlocked && !hiddenApps.isEmpty {
-                        appGridSection(title: "Hidden Apps", apps: hiddenApps)
+                        appGridSection(title: "lc.appList.hiddenApps".loc, apps: hiddenApps)
                     }
                 }
                 .padding(.horizontal, 18)
@@ -754,16 +756,16 @@ struct ShareExtensionRootView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                    Button("lc.common.cancel".loc) {
                         viewModel.cancelRequest()
                     }
                 }
             }
-            .alert("Error", isPresented: Binding(
+            .alert("lc.common.error".loc, isPresented: Binding(
                 get: { viewModel.errorMessage != nil },
                 set: { if !$0 { viewModel.errorMessage = nil } }
             )) {
-                Button("OK") { viewModel.errorMessage = nil }
+                Button("lc.common.ok".loc) { viewModel.errorMessage = nil }
             } message: {
                 Text(viewModel.errorMessage ?? "")
             }
@@ -774,7 +776,7 @@ struct ShareExtensionRootView: View {
 
     private func suggestedSection(apps: [ShareApp], showsInstallAction: Bool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Suggested")
+            Text("lc.common.suggested".loc)
                 .font(.headline)
             LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
                 if showsInstallAction {
@@ -914,7 +916,7 @@ struct ShareInstallGridEntry: View {
                     .foregroundStyle(.primary)
                     .background(Color(.secondarySystemBackground))
                     .clipShape(RoundedRectangle(cornerRadius: 52 * 0.2667, style: .continuous))
-                Text("Install")
+                Text("lc.common.install".loc)
                     .font(.caption)
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
@@ -1056,7 +1058,7 @@ enum ShareExtensionItemLoader {
                     return
                 }
                 guard let item else {
-                    continuation.resume(throwing: ShareExtensionError("Unable to read shared item."))
+                    continuation.resume(throwing: ShareExtensionError("lc.shareExtension.error.readSharedItem".loc))
                     return
                 }
                 continuation.resume(returning: item)

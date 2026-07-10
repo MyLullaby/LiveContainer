@@ -22,3 +22,22 @@
 }
 
 @end
+
+NSBundle* lcMainBundle = nil;
+__attribute__((constructor))
+static void init(void) {
+    lcMainBundle = [NSBundle bundleWithURL:NSBundle.mainBundle.bundleURL.URLByDeletingLastPathComponent.URLByDeletingLastPathComponent];
+    NSLog(@"%@", lcMainBundle);
+}
+
+@interface NSUserDefaults(ShareExtension)
++ (NSBundle*)lcMainBundle;
+@end
+
+@implementation NSUserDefaults(ShareExtension)
+
++ (NSBundle*)lcMainBundle {
+    return lcMainBundle;
+}
+
+@end

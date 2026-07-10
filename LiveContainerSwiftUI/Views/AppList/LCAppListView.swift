@@ -82,6 +82,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     @EnvironmentObject private var sharedAppSortManager : LCAppSortManager
     
     @AppStorage("LCMultitaskMode", store: LCUtils.appGroupUserDefault) var multitaskMode: MultitaskMode = .virtualWindow
+    @AppStorage("darkModeIcon", store: LCUtils.appGroupUserDefault) private var darkModeIcon = false
     
     @State private var isViewAppeared = false
     
@@ -243,16 +244,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                         Button {
                             LCUtils.openSideStore(delegate: self)
                         } label: {
-                            Image("SideStoreBadge")
-                                .resizable()
-                                .renderingMode(.template)
-                                .foregroundColor({
-                                    if SharedModel.isLiquidGlassEnabled {
-                                        return Color.primary
-                                    } else {
-                                        return Color.accentColor
-                                    }
-                                }())
+                            IconImageView(icon: BuiltInSideStoreAppInfo.shared.iconIsDarkIcon(darkModeIcon))
                                 .frame(width: UIFont.preferredFont(forTextStyle: .body).lineHeight, height: UIFont.preferredFont(forTextStyle: .body).lineHeight)
 
                         }
@@ -414,13 +406,6 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                 if let webpageUrlStr = UserDefaults.standard.string(forKey: "webPageToOpen") {
                     Task { await openWebView(urlString: webpageUrlStr) }
                     UserDefaults.standard.set(nil, forKey: "webPageToOpen")
-                }
-                Task {
-                    if UserDefaults.sideStoreExist() {
-                        let sidestoreAppInfo = BuiltInSideStoreAppInfo()
-                        // pre-generate sidestore's icon
-                        let _ = sidestoreAppInfo.iconIsDarkIcon(LCUtils.appGroupUserDefault.bool(forKey: "darkModeIcon"))
-                    }
                 }
                 
                 guard sharedModel.selectedTab == .apps, let link = sharedModel.deepLink else { return }
