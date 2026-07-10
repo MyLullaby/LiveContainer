@@ -987,7 +987,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         }
     }
     
-    func launchAppWithBundleId(bundleId : String, container : String?, forceJIT: Bool? = nil) async {
+    func launchAppWithBundleId(bundleId : String, container : String?, urlStr: String? = nil, forceJIT: Bool? = nil) async {
         if bundleId == "" {
             return
         }
@@ -1031,7 +1031,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         }
 
         do {
-            try await appFound.runApp(multitask: nil, containerFolderName: container, forceJIT: forceJIT)
+            try await appFound.runApp(multitask: nil, containerFolderName: container, urlStr: urlStr, forceJIT: forceJIT)
         } catch {
             errorInfo = error.localizedDescription
             errorShow = true
@@ -1189,6 +1189,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                 var bundleId : String? = nil
                 var containerName : String? = nil
                 var forceJIT: Bool? = nil
+                var urlStr: String? = nil
                 for queryItem in components.queryItems ?? [] {
                     if queryItem.name == "bundle-name", let bundleId1 = queryItem.value {
                         bundleId = bundleId1
@@ -1200,10 +1201,15 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                         } else if forceJIT1 == "false" {
                             forceJIT = false
                         }
+                    } else if queryItem.name == "open-url" {
+                        if let decodedData = Data(base64Encoded: queryItem.value ?? ""),
+                           let decodedUrl = String(data: decodedData, encoding: .utf8) {
+                            urlStr = decodedUrl
+                        }
                     }
                 }
                 if let bundleId, bundleId != "ui"{
-                    Task { await launchAppWithBundleId(bundleId: bundleId, container: containerName, forceJIT: forceJIT) }
+                    Task { await launchAppWithBundleId(bundleId: bundleId, container: containerName, urlStr: urlStr, forceJIT: forceJIT) }
                 }
             }
         } else if url.host == "install" {
