@@ -405,7 +405,7 @@ static void resolveLaunchExtensionFileBookmark(void) {
                                              relativeToURL:nil
                                        bookmarkDataIsStale:&isStale
                                                      error:&error];
-    if(!resolvedURL || ![resolvedURL startAccessingSecurityScopedResource]) {
+    if(!resolvedURL) {
         NSLog(@"[LC] Failed to resolve shared file bookmark: %@", error.localizedDescription);
     }
     [NSUserDefaults.lcSharedDefaults removeObjectForKey:@"LCLaunchExtensionFileBookmark"];
@@ -413,14 +413,10 @@ static void resolveLaunchExtensionFileBookmark(void) {
 }
 
 static LCControlAppURLHandling LCHandleControlAppURL(NSURL *url, NSString** modifiedURLStr) {
-    if(!url) {
+    if(!url || url.isFileURL) {
         return LCControlAppURLHandlingPassThrough;
     }
 
-    if(url.isFileURL) {
-        [url startAccessingSecurityScopedResource];
-        return LCControlAppURLHandlingPassThrough;
-    }
     // pass through sidestore urls
     if(NSUserDefaults.isSideStore && ![url.scheme isEqualToString:@"livecontainer"]) {
         return LCControlAppURLHandlingPassThrough;
