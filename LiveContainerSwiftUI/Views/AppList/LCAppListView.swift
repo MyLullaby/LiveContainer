@@ -1029,6 +1029,10 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             }
         }
         
+        if appFound == nil && bundleId == "builtinSideStore" {
+            appFound = LCAppModel(appInfo: BuiltInSideStoreAppInfo.shared)
+        }
+        
         if isFoundAppLocked && !sharedModel.isHiddenAppUnlocked {
             do {
                 let result = try await LCUtils.authenticateUser()

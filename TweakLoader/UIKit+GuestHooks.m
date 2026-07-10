@@ -482,6 +482,10 @@ static LCControlAppURLHandling LCHandleControlAppURL(NSURL *url, NSString** modi
                 }
             }
         } else {
+            if([bundleName isEqualToString:@"builtinSideStore"]) {
+                LCShowSwitchAppConfirmation(url, @"SideStore", NO);
+                return LCControlAppURLHandlingStop;
+            }
             handleLiveContainerLaunch(bundleName, containerFolderName, url);
         }
         
