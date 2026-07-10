@@ -415,6 +415,13 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                     Task { await openWebView(urlString: webpageUrlStr) }
                     UserDefaults.standard.set(nil, forKey: "webPageToOpen")
                 }
+                Task {
+                    if UserDefaults.sideStoreExist() {
+                        let sidestoreAppInfo = BuiltInSideStoreAppInfo()
+                        // pre-generate sidestore's icon
+                        let _ = sidestoreAppInfo.iconIsDarkIcon(LCUtils.appGroupUserDefault.bool(forKey: "darkModeIcon"))
+                    }
+                }
                 
                 guard sharedModel.selectedTab == .apps, let link = sharedModel.deepLink else { return }
                 sharedModel.deepLink = nil
@@ -874,7 +881,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             return
         }
         
-        guard let installUrl = URL(string: urlStr) else {
+        guard var installUrl = URL(string: urlStr) else {
             errorInfo = "lc.appList.urlInvalidError".loc
             errorShow = true
             return
@@ -887,21 +894,48 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         
         if installUrl.isFileURL {
             // install from local, we directly call local install method
-            if !installUrl.lastPathComponent.hasSuffix(".ipa") && !installUrl.lastPathComponent.hasSuffix(".tipa") {
+            let fileExtension = installUrl.pathExtension.lowercased()
+            if fileExtension != "ipa" && fileExtension != "tipa" {
                 errorInfo = "lc.appList.urlFileIsNotIpaError".loc
                 errorShow = true
                 return
             }
             
             let fm = FileManager.default
-            if !fm.isReadableFile(atPath: installUrl.path) && !installUrl.startAccessingSecurityScopedResource() {
+            var didStartAccessing = false
+            if !fm.isReadableFile(atPath: installUrl.path),
+               let bookmarkData = LCUtils.appGroupUserDefault.data(forKey: "LCLaunchExtensionFileBookmark") {
+                do {
+                    var isStale = false
+                    let resolvedURL = try URL(
+                        resolvingBookmarkData: bookmarkData,
+                        options: URL.BookmarkResolutionOptions(rawValue: 1 << 10),
+                        relativeTo: nil,
+                        bookmarkDataIsStale: &isStale
+                    )
+                    installUrl = resolvedURL
+                    didStartAccessing = resolvedURL.startAccessingSecurityScopedResource()
+                } catch {
+                    errorInfo =  "Failed to resolve shared IPA bookmark: \(error.localizedDescription)"
+                    errorShow = true
+                    return
+                }
+            }
+
+            if !fm.isReadableFile(atPath: installUrl.path) && !didStartAccessing {
+                didStartAccessing = installUrl.startAccessingSecurityScopedResource()
+            }
+
+            if !fm.isReadableFile(atPath: installUrl.path) && !didStartAccessing {
                 errorInfo = "lc.appList.ipaAccessError".loc
                 errorShow = true
                 return
             }
             
             defer {
-                installUrl.stopAccessingSecurityScopedResource()
+                if didStartAccessing {
+                    installUrl.stopAccessingSecurityScopedResource()
+                }
             }
             
             do {
@@ -916,9 +950,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                 var shouldDelete = false
                 if let documentsDirectory = fm.urls(for: .documentDirectory, in: .userDomainMask).first {
                     let inboxURL = documentsDirectory.appendingPathComponent("Inbox")
-                    let fileURL = inboxURL.appendingPathComponent(installUrl.lastPathComponent)
-                    
-                    shouldDelete = fm.fileExists(atPath: fileURL.path)
+                    shouldDelete = installUrl.deletingLastPathComponent().standardizedFileURL == inboxURL.standardizedFileURL
                 }
                 if shouldDelete {
                     try fm.removeItem(at: installUrl)

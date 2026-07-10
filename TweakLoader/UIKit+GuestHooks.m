@@ -469,7 +469,9 @@ static LCControlAppURLHandling LCHandleControlAppURL(NSURL *url, NSString** modi
         if(!containerFolderName) {
             containerFolderName = findDefaultContainerWithBundleId(bundleName);
         }
-        if ([bundleName isEqualToString:NSBundle.mainBundle.bundlePath.lastPathComponent] && [containerId isEqualToString:containerFolderName]) {
+        // current bundlename and container folder name matches OR sidestore is running and we are launching builtinSideStore
+        if (([bundleName isEqualToString:NSBundle.mainBundle.bundlePath.lastPathComponent] && [containerId isEqualToString:containerFolderName]) ||
+            (NSUserDefaults.isSideStore && [bundleName isEqualToString:@"builtinSideStore"])) {
             if(openUrl) {
                 if([openUrl hasPrefix:@"file:"]) {
                     resolveLaunchExtensionFileBookmark();

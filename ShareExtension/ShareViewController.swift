@@ -45,6 +45,9 @@ struct ShareApp: Identifiable, Hashable {
     let isJITNeeded: Bool
     let containers: [ShareContainer]
     let iconURL: URL?
+    let lastLaunched: Date?
+    let installationDate: Date?
+    let isBuiltInSideStore: Bool
 
     var primaryContainer: ShareContainer? {
         containers.first
@@ -154,13 +157,55 @@ final class ShareExtensionViewModel: ObservableObject {
                 }
             }
 
+            if app.isBuiltInSideStore {
+                try launchBuiltInSideStore(context: context)
+                return
+            }
+
             let item = ShareLaunchItem(app: app, container: container)
-            let launchURLString = try preparePayloadForLaunch(item)
+            let launchURLString = try preparePayloadForLaunch()
             guard let launchURL = buildLaunchURL(for: item, launchURLString: launchURLString) else {
                 throw ShareExtensionError("Unable to build launch URL.")
             }
 
             LCShareExtensionLauncher.openURL(fromShareExtension: launchURL)
+            (context ?? currentContext)?.completeRequest(returningItems: nil, completionHandler: nil)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func shouldShowInstallAction() -> Bool {
+        guard case .file(let fileURL) = payload.kind else {
+            return false
+        }
+        let ext = fileURL.pathExtension.lowercased()
+        return ext == "ipa" || ext == "tipa"
+    }
+
+    func installSharedFileInLiveContainer(context: NSExtensionContext?) async {
+        if isLaunching {
+            return
+        }
+        guard case .file(let fileURL) = payload.kind else {
+            return
+        }
+        isLaunching = true
+        defer { isLaunching = false }
+
+        do {
+            try storeBookmark(for: fileURL)
+            guard var components = URLComponents(string: "livecontainer://install") else {
+                throw ShareExtensionError("Unable to build install URL.")
+            }
+            components.queryItems = [
+                URLQueryItem(name: "url", value: fileURL.absoluteString)
+            ]
+            guard let installURL = components.url else {
+                throw ShareExtensionError("Unable to build install URL.")
+            }
+
+            LCShareExtensionLauncher.openURL(fromShareExtension: installURL)
             (context ?? currentContext)?.completeRequest(returningItems: nil, completionHandler: nil)
         } catch {
             errorMessage = error.localizedDescription
@@ -185,6 +230,16 @@ final class ShareExtensionViewModel: ObservableObject {
             .sorted { (rank[$0.bundleIdentifier.lowercased()] ?? Int.max) < (rank[$1.bundleIdentifier.lowercased()] ?? Int.max) }
     }
 
+    func suggestedApps() -> [ShareApp] {
+        var apps = recommendedApps()
+        if shouldShowInstallAction(),
+           let sideStoreApp = visibleApps.first(where: { $0.isBuiltInSideStore }),
+           !apps.contains(where: { $0.id == sideStoreApp.id }) {
+            apps.append(sideStoreApp)
+        }
+        return apps
+    }
+
     func regularApps() -> [ShareApp] {
         visibleApps
     }
@@ -205,18 +260,84 @@ final class ShareExtensionViewModel: ObservableObject {
         if let appGroupRootURL {
             apps.append(contentsOf: loadApps(root: appGroupRootURL, isShared: true))
         }
+        if let builtInSideStore = loadBuiltInSideStoreApp() {
+            apps.append(builtInSideStore)
+        }
 
         allApps = apps
         rebuildVisibleApps()
     }
 
     private func rebuildVisibleApps() {
-        let sorted = allApps.sorted {
-            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
-        }
+        let sorted = sortApps(allApps)
 
         visibleApps = sorted.filter { !$0.isHidden }
         hiddenApps = sorted.filter { $0.isHidden }
+    }
+
+    private func sortApps(_ apps: [ShareApp]) -> [ShareApp] {
+        let regularApps = apps.filter { !$0.isBuiltInSideStore }
+        let sideStoreApps = apps.filter { $0.isBuiltInSideStore }
+        let sortType = sharedDefaults?.string(forKey: "LCAppSortType") ?? "default"
+        let sorted: [ShareApp]
+
+        switch sortType {
+        case "alphabetical":
+            sorted = regularApps.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        case "reverse_alphabetical":
+            sorted = regularApps.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedDescending }
+        case "last_launched":
+            let dated = regularApps.compactMap { app -> (ShareApp, Date)? in
+                guard let lastLaunched = app.lastLaunched else {
+                    return nil
+                }
+                return (app, lastLaunched)
+            }
+            .sorted { $0.1 > $1.1 }
+            .map { $0.0 }
+            let undated = regularApps.filter { $0.lastLaunched == nil }
+            sorted = dated + undated
+        case "installationDate":
+            let dated = regularApps.compactMap { app -> (ShareApp, Date)? in
+                guard let installationDate = app.installationDate else {
+                    return nil
+                }
+                return (app, installationDate)
+            }
+            .sorted { $0.1 > $1.1 }
+            .map { $0.0 }
+            let undated = regularApps.filter { $0.installationDate == nil }
+            sorted = dated + undated
+        case "custom":
+            sorted = sortByCustomOrder(regularApps)
+        default:
+            sorted = regularApps
+        }
+
+        return sorted + sideStoreApps
+    }
+
+    private func sortByCustomOrder(_ apps: [ShareApp]) -> [ShareApp] {
+        guard let customSortOrder = sharedDefaults?.array(forKey: "LCCustomSortOrder") as? [String],
+              !customSortOrder.isEmpty else {
+            return apps.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        }
+
+        var sortedApps: [ShareApp] = []
+        var remainingApps = apps
+        for uniqueID in customSortOrder {
+            if let index = remainingApps.firstIndex(where: { uniqueID == uniqueIdentifier(for: $0) }) {
+                sortedApps.append(remainingApps.remove(at: index))
+            }
+        }
+
+        remainingApps.sort { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        sortedApps.append(contentsOf: remainingApps)
+        return sortedApps
+    }
+
+    private func uniqueIdentifier(for app: ShareApp) -> String {
+        "\(app.bundleIdentifier):\(app.relativeBundlePath)"
     }
 
     private func loadApps(root: URL, isShared: Bool) -> [ShareApp] {
@@ -269,8 +390,73 @@ final class ShareExtensionViewModel: ObservableObject {
             isLocked: appInfo["isLocked"] as? Bool ?? false,
             isJITNeeded: appInfo["isJITNeeded"] as? Bool ?? false,
             containers: usableContainers,
-            iconURL: iconURL
+            iconURL: iconURL,
+            lastLaunched: appInfo["lastLaunched"] as? Date,
+            installationDate: appInfo["installationDate"] as? Date,
+            isBuiltInSideStore: false
         )
+    }
+
+    private func loadBuiltInSideStoreApp() -> ShareApp? {
+        let sideStoreFrameworkURL = Bundle.main.bundleURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Frameworks/SideStoreApp.framework")
+        guard FileManager.default.fileExists(atPath: sideStoreFrameworkURL.path) else {
+            return nil
+        }
+
+        let container = ShareContainer(
+            id: "builtinSideStore",
+            folderName: "builtinSideStore",
+            name: "SideStore",
+            isShared: false,
+            containerURL: sideStoreFrameworkURL,
+            bookmarkData: nil
+        )
+
+        return ShareApp(
+            id: "builtinSideStore",
+            relativeBundlePath: "builtinSideStore",
+            displayName: "SideStore",
+            bundleIdentifier: "builtinSideStore",
+            isShared: false,
+            isHidden: false,
+            isLocked: false,
+            isJITNeeded: false,
+            containers: [container],
+            iconURL: builtInSideStoreIconURL(),
+            lastLaunched: nil,
+            installationDate: nil,
+            isBuiltInSideStore: true
+        )
+    }
+
+    private func builtInSideStoreIconURL() -> URL? {
+        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let iconCacheURL = caches.appendingPathComponent("BuiltInSideStoreIconCache", isDirectory: true)
+        let lightIconURL = iconCacheURL.appendingPathComponent("LCAppIconLight.png")
+        let darkIconURL = iconCacheURL.appendingPathComponent("LCAppIconDark.png")
+
+        let preferredIconURL: URL
+        let fallbackIconURL: URL
+        if #available(iOS 18.0, *), sharedDefaults?.bool(forKey: "darkModeIcon") == true {
+            preferredIconURL = darkIconURL
+            fallbackIconURL = lightIconURL
+        } else {
+            preferredIconURL = lightIconURL
+            fallbackIconURL = darkIconURL
+        }
+
+        if FileManager.default.fileExists(atPath: preferredIconURL.path) {
+            return preferredIconURL
+        }
+        if FileManager.default.fileExists(atPath: fallbackIconURL.path) {
+            return fallbackIconURL
+        }
+        return nil
     }
 
     private func iconURL(for appURL: URL) -> URL? {
@@ -335,7 +521,7 @@ final class ShareExtensionViewModel: ObservableObject {
         ]
     }
 
-    private func preparePayloadForLaunch(_ item: ShareLaunchItem) throws -> String? {
+    private func preparePayloadForLaunch() throws -> String? {
         switch payload.kind {
         case .url(let url):
             return url.absoluteString
@@ -349,6 +535,34 @@ final class ShareExtensionViewModel: ObservableObject {
         case .failed(let message):
             throw ShareExtensionError(message)
         }
+    }
+
+    private func launchBuiltInSideStore(context: NSExtensionContext?) throws {
+        let launchURLString = try preparePayloadForLaunch()
+
+        sharedDefaults?.set("livecontainer", forKey: "LCLaunchExtensionScheme")
+        sharedDefaults?.set("builtinSideStore", forKey: "LCLaunchExtensionBundleID")
+        if let launchURLString {
+            sharedDefaults?.set(launchURLString, forKey: "LCLaunchExtensionLaunchURL")
+        }
+        sharedDefaults?.set(Date(), forKey: "LCLaunchExtensionLaunchDate")
+
+        guard var components = URLComponents(string: "livecontainer://livecontainer-launch") else {
+            throw ShareExtensionError("Unable to build SideStore launch URL.")
+        }
+        var queryItems = [
+            URLQueryItem(name: "bundle-name", value: "builtinSideStore")
+        ]
+        if let launchURLString {
+            queryItems.append(URLQueryItem(name: "open-url", value: Data(launchURLString.utf8).base64EncodedString()))
+        }
+        components.queryItems = queryItems
+        guard let launchURL = components.url else {
+            throw ShareExtensionError("Unable to build SideStore launch URL.")
+        }
+
+        LCShareExtensionLauncher.openURL(fromShareExtension: launchURL)
+        (context ?? currentContext)?.completeRequest(returningItems: nil, completionHandler: nil)
     }
 
     private func storeBookmark(for fileURL: URL) throws {
@@ -511,8 +725,8 @@ struct ShareExtensionRootView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    let recommended = viewModel.recommendedApps()
-                    suggestedSection(apps: recommended)
+                    let suggested = viewModel.suggestedApps()
+                    suggestedSection(apps: suggested, showsInstallAction: viewModel.shouldShowInstallAction())
 
                     let regular = viewModel.regularApps()
                     let hiddenApps = viewModel.hiddenRegularApps()
@@ -558,12 +772,15 @@ struct ShareExtensionRootView: View {
         }
     }
 
-    private func suggestedSection(apps: [ShareApp]) -> some View {
+    private func suggestedSection(apps: [ShareApp], showsInstallAction: Bool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Suggested")
                 .font(.headline)
             LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
-                if apps.isEmpty {
+                if showsInstallAction {
+                    ShareInstallGridEntry(viewModel: viewModel, extensionContext: extensionContext)
+                }
+                if apps.isEmpty && !showsInstallAction {
                     ShareSuggestedPlaceholderLabel()
                 } else {
                     ForEach(apps) { app in
@@ -575,11 +792,16 @@ struct ShareExtensionRootView: View {
     }
 
     private func appGridSection(title: String, apps: [ShareApp], includesHiddenUnlockButton: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let regularApps = apps.filter { !$0.isBuiltInSideStore }
+        let sideStoreApps = apps.filter { $0.isBuiltInSideStore }
+        return VStack(alignment: .leading, spacing: 10) {
             Text(title)
                 .font(.headline)
             LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
-                ForEach(apps) { app in
+                ForEach(regularApps) { app in
+                    ShareAppGridEntry(app: app, viewModel: viewModel, extensionContext: extensionContext)
+                }
+                ForEach(sideStoreApps) { app in
                     ShareAppGridEntry(app: app, viewModel: viewModel, extensionContext: extensionContext)
                 }
                 if includesHiddenUnlockButton {
@@ -674,6 +896,34 @@ struct ShareAppGridLabel: View {
                 .frame(width: 64, height: 32, alignment: .top)
         }
         .frame(width: 64)
+    }
+}
+
+struct ShareInstallGridEntry: View {
+    @ObservedObject var viewModel: ShareExtensionViewModel
+    let extensionContext: NSExtensionContext?
+
+    var body: some View {
+        Button {
+            Task { await viewModel.installSharedFileInLiveContainer(context: extensionContext) }
+        } label: {
+            VStack(spacing: 7) {
+                Image(systemName: "square.and.arrow.down")
+                    .font(.system(size: 25, weight: .semibold))
+                    .frame(width: 52, height: 52)
+                    .foregroundStyle(.primary)
+                    .background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 52 * 0.2667, style: .continuous))
+                Text("Install")
+                    .font(.caption)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .foregroundStyle(.primary)
+                    .frame(width: 64, height: 32, alignment: .top)
+            }
+            .frame(width: 64)
+        }
+        .buttonStyle(.plain)
     }
 }
 
