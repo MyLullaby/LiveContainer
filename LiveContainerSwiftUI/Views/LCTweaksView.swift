@@ -103,11 +103,13 @@ struct LCTweakFolderView : View {
                             }
                         }
                         .opacity(tweakItem.isEnabled ? 1 : 0.4)
-                        Toggle("", isOn: Binding(
-                            get: { tweakItem.isEnabled },
-                            set: { setTweakEnabled(tweakItem: tweakItem, enabled: $0) }
-                        ))
-                        .labelsHidden()
+                        if tweakItem.displayName != "TweakLoader.dylib" {
+                            Toggle("", isOn: Binding(
+                                get: { tweakItem.isEnabled },
+                                set: { setTweakEnabled(tweakItem: tweakItem, enabled: $0) }
+                            ))
+                            .labelsHidden()
+                        }
                     }
                     .contextMenu {
                         Button {
