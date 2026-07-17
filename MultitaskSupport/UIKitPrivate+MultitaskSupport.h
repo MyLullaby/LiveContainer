@@ -81,13 +81,16 @@ extern const UIApplication *UIApp;
 
 @interface FBScene : NSObject
 @property(nonatomic, assign, readonly) _UISceneRelationshipManagementHostComponent *_relationshipManagementHostComponent API_AVAILABLE(ios(17.4));
+@property(nonatomic, readonly) id delegate;
 - (FBProcess *)clientProcess;
 - (UIScenePresentationManager *)uiPresentationManager;
+- (void)_performUpdateWithoutActivation:(void (^)(UIMutableApplicationSceneSettings *settings, FBSSceneTransitionContext *context))updateBlock;
 - (void)updateSettings:(UIMutableApplicationSceneSettings *)settings withTransitionContext:(id)context completion:(id)completion;
 - (void)updateSettingsWithBlock:(void(^)(UIMutableApplicationSceneSettings *settings))arg1;
 - (void)updateSettingsWithTransitionBlock:(UIApplicationSceneTransitionContext *(^)(/* FBSMutableSceneSettings * */ id settings))transitionBlock;
 - (void)addExtension:(Class)extension;
 - (void)configureParameters:(void(^)(FBSMutableSceneParameters *parameters))parametersBlock;
+- (id)ui_viewServiceComponent;// API_AVAILABLE(ios(26.0));
 @end
 
 @interface FBDisplayManager : NSObject
