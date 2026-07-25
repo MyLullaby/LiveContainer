@@ -1109,7 +1109,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             enableJITTask.cancel()
             return
         }
-        LCSharedUtils.launchToGuestApp()
+        LCSharedUtils.launchToGuestApp(withClassicMode: 0)
 
     }
     

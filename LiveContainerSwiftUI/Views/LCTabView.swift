@@ -140,7 +140,7 @@ struct LCTabView: View {
             closeDuplicatedWindow()
             checkLastLaunchError()
             checkTeamId()
-            checkBundleId()
+            checkAndSaveBundleId()
             checkGetTaskAllow()
             checkPrivateContainerBookmark()
         }
@@ -260,7 +260,12 @@ struct LCTabView: View {
         UserDefaults.standard.set(currentTeamId, forKey: "LCCertificateTeamId")
     }
     
-    func checkBundleId() {
+    func checkAndSaveBundleId() {
+        if DataManager.shared.model.multiLCStatus == 2 {
+            let scheme = UserDefaults.lcAppUrlScheme() ?? ""
+            LCUtils.appGroupUserDefault.set(Bundle.main.bundleIdentifier, forKey: "LCBundleID.\(scheme)")
+        }
+        
         if UserDefaults.standard.bool(forKey: "LCBundleIdChecked") {
             return
         }

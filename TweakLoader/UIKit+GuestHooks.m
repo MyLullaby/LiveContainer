@@ -209,7 +209,7 @@ void LCOpenWebPage(NSString* webPageUrlString, NSString* originalUrl) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"LiveContainer" message:message preferredStyle:UIAlertControllerStyleAlert];
     UIAlertAction* okAction = [UIAlertAction actionWithTitle:@"lc.common.ok".loc style:UIAlertActionStyleDefault handler:^(UIAlertAction * action) {
         [NSClassFromString(@"LCSharedUtils") setWebPageUrlForNextLaunch:webPageUrlString];
-        [NSClassFromString(@"LCSharedUtils") launchToGuestApp];
+        [NSClassFromString(@"LCSharedUtils") launchToGuestAppWithClassicMode:0];
     }];
     [alert addAction:okAction];
     UIAlertAction* openNowAction = [UIAlertAction actionWithTitle:@"lc.guestTweak.openInCurrentApp".loc style:UIAlertActionStyleDefault handler:^(UIAlertAction * action) {
@@ -245,7 +245,7 @@ void LCOpenSideStoreURL(NSURL* sidestoreUrl) {
     if ([NSUserDefaults.lcUserDefaults boolForKey:@"LCSwitchAppWithoutAsking"]) {
         [NSUserDefaults.lcUserDefaults setObject:sidestoreUrl.absoluteString forKey:@"launchAppUrlScheme"];
         [NSUserDefaults.lcUserDefaults setObject:@"builtinSideStore" forKey:@"selected"];
-        [NSClassFromString(@"LCSharedUtils") launchToGuestApp];
+        [NSClassFromString(@"LCSharedUtils") launchToGuestAppWithClassicMode:0];
     }
     NSString *message = [@"lc.guestTweak.appSwitchTip %@" localizeWithFormat:@"SideStore"];
     UIWindow *window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
@@ -253,7 +253,7 @@ void LCOpenSideStoreURL(NSURL* sidestoreUrl) {
     UIAlertAction* okAction = [UIAlertAction actionWithTitle:@"lc.common.ok".loc style:UIAlertActionStyleDefault handler:^(UIAlertAction * action) {
         [NSUserDefaults.lcUserDefaults setObject:sidestoreUrl.absoluteString forKey:@"launchAppUrlScheme"];
         [NSUserDefaults.lcUserDefaults setObject:@"builtinSideStore" forKey:@"selected"];
-        [NSClassFromString(@"LCSharedUtils") launchToGuestApp];
+        [NSClassFromString(@"LCSharedUtils") launchToGuestAppWithClassicMode:0];
     }];
     [alert addAction:okAction];
     

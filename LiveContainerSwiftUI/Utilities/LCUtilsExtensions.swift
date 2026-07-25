@@ -211,7 +211,7 @@ extension LCUtils {
         // if LiveContainer is installed by TrollStore
         let tsPath = "\(Bundle.main.bundlePath)/../_TrollStore"
         if (access((tsPath as NSString).utf8String, 0) == 0) {
-            LCSharedUtils.launchToGuestApp()
+            LCSharedUtils.launchToGuestApp(withClassicMode: 0)
             return true
         }
         

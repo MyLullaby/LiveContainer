@@ -366,7 +366,7 @@ class LCAppModel: ObservableObject, Hashable {
                 let fileURL = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0].appendingPathComponent("preloadLibraries.txt")
                 try fileContents?.write(to: fileURL)
             }
-            LCSharedUtils.launchToGuestApp()
+            LCSharedUtils.launchToGuestApp(withClassicMode: 0)
         }
         
         // Record the launch time
