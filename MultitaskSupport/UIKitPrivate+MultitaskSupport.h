@@ -293,7 +293,7 @@ API_AVAILABLE(ios(17.0))
 API_AVAILABLE(ios(17.4))
 @interface _UISceneHostingControllerAdvancedConfiguration : NSObject
 @property(retain, nonatomic) UIApplicationSceneSpecification *sceneSpecification;
-@property(retain, nonatomic) NSOrderedSet *additionalExtensions;
+@property(retain, nonatomic) NSOrderedSet *additionalExtensions API_AVAILABLE(ios(18.0));
 - (instancetype)initWithProcessIdentity:(RBSProcessIdentity *)identity;
 @end
 
