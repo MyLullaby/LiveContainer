@@ -12,11 +12,11 @@ static void (*orig__willPerformHostCallback)(id self, SEL _cmd, id callback);
 
 static void hook__willPerformHostCallback(NSExtensionContext* self, SEL _cmd, id callback) {
     NSExtensionItem *item = self.inputItems.firstObject;
-    NSURL* url = item.userInfo[@"url"];
-    if (url) {
+    NSDictionary *launchOptions = item.userInfo;
+    if ([launchOptions[@"url"] isKindOfClass:NSURL.class]) {
         // handle url in another thread so it returns faster so iOS will not show progress bar for the shortcut
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), ^{
-            [LCShareExtensionLauncher openURLFromShareExtension:url];
+            [LCShareExtensionLauncher openURLFromShareExtensionWithOptions:launchOptions];
         });
     }
 

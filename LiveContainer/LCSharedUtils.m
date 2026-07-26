@@ -190,7 +190,14 @@ extern NSBundle *lcMainBundle;
         // Attempt to restart LiveContainer with the selected guest app
         [lcUserDefaults setObject:launchBundleId forKey:@"selected"];
         [lcUserDefaults setObject:containerFolderName forKey:@"selectedContainer"];
-        return [self launchToGuestAppWithClassicMode:0];
+        bool isSharedApp = false;
+        NSBundle *appBundle = [self findBundleWithBundleId:launchBundleId isSharedAppOut:&isSharedApp];
+        NSDictionary *appInfo = [NSDictionary dictionaryWithContentsOfFile:
+            [appBundle.bundlePath stringByAppendingPathComponent:@"LCAppInfo.plist"]];
+        NSUInteger classicMode = [appInfo[@"classicMode"] boolValue]
+            ? [appInfo[@"LCClassicModeCache"][@"defaultClassicMode"] unsignedIntegerValue]
+            : 0;
+        return [self launchToGuestAppWithClassicMode:classicMode];
     }
     
     return NO;

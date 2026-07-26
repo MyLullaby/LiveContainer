@@ -341,6 +341,14 @@ struct LCAppSettingsView: View {
             }
             
             Section {
+                Toggle(isOn: $model.uiClassicMode) {
+                    Text("lc.appSettings.classicMode".loc)
+                }
+            } footer: {
+                Text("lc.appSettings.classicModeDesc".loc)
+            }
+            
+            Section {
                 Toggle(isOn: $model.uiSpoofSDKVersion) {
                     Text("lc.appSettings.spoofSDKVersion".loc)
                 }

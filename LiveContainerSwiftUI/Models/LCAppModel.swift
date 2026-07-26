@@ -3,8 +3,8 @@ import Foundation
 protocol LCAppModelDelegate {
     func closeNavigationView()
     func changeAppVisibility(app : LCAppModel)
-    func jitLaunch(appName: String) async
-    func jitLaunch(withScript script: String, appName: String) async
+    func jitLaunch(appName: String, classicMode: UInt) async
+    func jitLaunch(withScript script: String, appName: String, classicMode: UInt) async
     func jitLaunch(withPID pid: Int, withScript script: String?, appName: String) async
     func showRunWhenMultitaskAlert() async -> Bool?
 }
@@ -21,6 +21,11 @@ class LCAppModel: ObservableObject, Hashable {
     @Published var uiIsJITNeeded : Bool {
         didSet {
             appInfo.isJITNeeded = uiIsJITNeeded
+        }
+    }
+    @Published var uiClassicMode : Bool {
+        didSet {
+            appInfo.classicMode = uiClassicMode
         }
     }
     @Published var uiIsHidden : Bool
@@ -158,6 +163,7 @@ class LCAppModel: ObservableObject, Hashable {
         }
         
         self.uiIsJITNeeded = appInfo.isJITNeeded
+        self.uiClassicMode = appInfo.classicMode
         self.uiIsHidden = appInfo.isHidden
         self.uiIsLocked = appInfo.isLocked
         self.uiIsShared = appInfo.isShared
@@ -221,7 +227,8 @@ class LCAppModel: ObservableObject, Hashable {
         }
         let currentDataFolder = containerFolderName ?? uiSelectedContainer?.folderName
         
-        let multitask = multitask ?? shouldLaunchInMultitaskMode;
+        let classicMode = appInfo.defaultClassicMode
+        let multitask = classicMode == 0 ? (multitask ?? shouldLaunchInMultitaskMode) : false
         
         if MultitaskManager.isMultitasking() || multitask,
            let currentDataFolder {
@@ -353,9 +360,9 @@ class LCAppModel: ObservableObject, Hashable {
             } else {
                 // Non-multitask JIT flow remains unchanged
                 if let scriptData = jitLaunchScriptJs, !scriptData.isEmpty {
-                    await delegate?.jitLaunch(withScript: scriptData, appName: self.appInfo.displayName())
+                    await delegate?.jitLaunch(withScript: scriptData, appName: self.appInfo.displayName(), classicMode: classicMode)
                 } else {
-                    await delegate?.jitLaunch(appName: self.appInfo.displayName())
+                    await delegate?.jitLaunch(appName: self.appInfo.displayName(), classicMode: classicMode)
                 }
             }
         } else if multitask, #available(iOS 16.0, *) {
@@ -366,7 +373,7 @@ class LCAppModel: ObservableObject, Hashable {
                 let fileURL = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0].appendingPathComponent("preloadLibraries.txt")
                 try fileContents?.write(to: fileURL)
             }
-            LCSharedUtils.launchToGuestApp(withClassicMode: 0)
+            LCSharedUtils.launchToGuestApp(withClassicMode: classicMode)
         }
         
         // Record the launch time

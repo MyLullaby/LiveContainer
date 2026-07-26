@@ -8,7 +8,6 @@
 #import <UIKit/UIKit.h>
 #import "UIKitPrivate.h"
 
-#define PrivClass(NAME) NSClassFromString(@#NAME)
 extern const UIApplication *UIApp;
 
 @interface LSResourceProxy : NSObject
