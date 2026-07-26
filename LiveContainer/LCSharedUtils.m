@@ -8,6 +8,9 @@ extern NSUserDefaults *lcUserDefaults;
 extern NSString *lcAppUrlScheme;
 extern NSBundle *lcMainBundle;
 
+NSString* FBSOpenApplicationOptionKeyActivateAsClassic = @"__ActivateAsClassic";
+NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
+
 @implementation LCSharedUtils
 
 + (NSString*) teamIdentifier {
@@ -146,13 +149,13 @@ extern NSBundle *lcMainBundle;
 
 
     int tries = 2;
-    _LSOpenConfiguration *configuration = [[_LSOpenConfiguration alloc] init];
+    _LSOpenConfiguration *configuration = [[PrivClass(_LSOpenConfiguration) alloc] init];
     if(classicMode) {
         NSMutableDictionary* dict = [NSMutableDictionary new];
         dict[FBSOpenApplicationOptionKeyActivateAsClassic] = @(classicMode);
         configuration.frontBoardOptions = dict;
     }
-    LSApplicationWorkspace* workspace = [LSApplicationWorkspace defaultWorkspace];
+    LSApplicationWorkspace* workspace = [PrivClass(LSApplicationWorkspace) defaultWorkspace];
     
     for (int i = 0; i < tries; i++) {
         [workspace openApplicationWithBundleIdentifier:NSUserDefaults.lcMainBundle.bundleIdentifier

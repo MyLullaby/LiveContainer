@@ -8,6 +8,8 @@
 #import "../LiveContainer/utils.h"
 #import "../LiveContainer/UIKitPrivate.h"
 
+static Class LSApplicationWorkspaceClass;
+static Class _LSOpenConfigurationClass;
 
 @implementation LCShareExtensionLauncher
 
@@ -22,7 +24,7 @@
         return NO;
     }
 
-    LSApplicationWorkspace* workspace = [LSApplicationWorkspace defaultWorkspace];
+    LSApplicationWorkspace* workspace = [LSApplicationWorkspaceClass defaultWorkspace];
 
     NSString* bundleIdToLaunch = nil;
     NSString* scheme = url.scheme;
@@ -36,14 +38,14 @@
     if(scheme) {
         NSNumber *classicMode = options[@"classicMode"];
         if ([classicMode isKindOfClass:NSNumber.class] && classicMode.unsignedIntegerValue != 0) {
-            _LSOpenConfiguration *classicConfig = [[_LSOpenConfiguration alloc] init];
+            _LSOpenConfiguration *classicConfig = [[_LSOpenConfigurationClass alloc] init];
             classicConfig.frontBoardOptions = @{
                 FBSOpenApplicationOptionKeyActivateAsClassic: classicMode
             };
             [workspace openApplicationWithBundleIdentifier:bundleIdToLaunch configuration:classicConfig completionHandler:nil];
         }
 
-        _LSOpenConfiguration *config = [[_LSOpenConfiguration alloc] init];
+        _LSOpenConfiguration *config = [[_LSOpenConfigurationClass alloc] init];
         config.frontBoardOptions = @{
             FBSOpenApplicationOptionKeyPayloadURL: url
         };
@@ -65,6 +67,11 @@
 + (BOOL)canOpenURLFromShareExtension:(NSURL *)url {
     id error = nil;
     return [[PrivClass(LSApplicationWorkspace) defaultWorkspace] isApplicationAvailableToOpenURL:url error:&error];
+}
+
++ (void)load {
+    _LSOpenConfigurationClass = PrivClass(_LSOpenConfiguration);
+    LSApplicationWorkspaceClass = PrivClass(LSApplicationWorkspace);
 }
 
 @end

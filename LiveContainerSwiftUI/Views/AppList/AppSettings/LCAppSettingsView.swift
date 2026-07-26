@@ -340,12 +340,14 @@ struct LCAppSettingsView: View {
                 Text("lc.appSettings.hideLiveContainerDesc".loc)
             }
             
-            Section {
-                Toggle(isOn: $model.uiClassicMode) {
-                    Text("lc.appSettings.classicMode".loc)
+            if #available(iOS 16.0, *) {
+                Section {
+                    Toggle(isOn: $model.uiClassicMode) {
+                        Text("lc.appSettings.classicMode".loc)
+                    }
+                } footer: {
+                    Text("lc.appSettings.classicModeDesc".loc)
                 }
-            } footer: {
-                Text("lc.appSettings.classicModeDesc".loc)
             }
             
             Section {

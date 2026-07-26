@@ -601,8 +601,9 @@ static LCControlAppURLHandling LCHandleControlAppURL(NSURL *url, NSString** modi
     dispatch_once(&onceToken, ^{
 //        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            [[LSApplicationWorkspace defaultWorkspace] openApplicationWithBundleID:@"com.apple.springboard"];
-            [[LSApplicationWorkspace defaultWorkspace] openApplicationWithBundleID:NSUserDefaults.lcMainBundle.bundleIdentifier];
+            LSApplicationWorkspace* workspace = [objc_lookUpClass("LSApplicationWorkspace") defaultWorkspace];
+            [workspace openApplicationWithBundleID:@"com.apple.springboard"];
+            [workspace openApplicationWithBundleID:NSUserDefaults.lcMainBundle.bundleIdentifier];
         });
 
     });

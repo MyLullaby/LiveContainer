@@ -10,7 +10,7 @@
 #import "../LiveContainer/utils.h"
 
 bool lsApplicationWorkspaceCanOpenURL(NSURL* url) {
-    LSApplicationWorkspace* workspace = [LSApplicationWorkspace defaultWorkspace];
+    LSApplicationWorkspace* workspace = [PrivClass(LSApplicationWorkspace) defaultWorkspace];
     NSError* error;
     BOOL success = [workspace isApplicationAvailableToOpenURL:url error:&error];
     return success;
