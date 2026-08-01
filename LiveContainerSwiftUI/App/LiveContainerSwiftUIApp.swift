@@ -10,9 +10,6 @@ import SwiftUI
 struct LiveContainerSwiftUIApp : SwiftUI.App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
-    @State var appDataFolderNames: [String]
-    @State var tweakFolderNames: [String]
-    
     init() {
         let fm = FileManager()
         var tempAppDataFolderNames : [String] = []
@@ -86,17 +83,16 @@ struct LiveContainerSwiftUIApp : SwiftUI.App {
         
         DataManager.shared.model.apps = tempApps
         DataManager.shared.model.hiddenApps = tempHiddenApps
+        DataManager.shared.model.appDataFolderNames = tempAppDataFolderNames
+        DataManager.shared.model.tweakFolderNames = tempTweakFolderNames
         if let tempURLSchemes {
             UserDefaults.lcShared().set(Array(tempURLSchemes), forKey: "LCGuestURLSchemes")
         }
-        
-        _appDataFolderNames = State(initialValue: tempAppDataFolderNames)
-        _tweakFolderNames = State(initialValue: tempTweakFolderNames)
     }
     
     var body: some Scene {
         WindowGroup(id: "Main") {
-            LCTabView(appDataFolderNames: $appDataFolderNames, tweakFolderNames: $tweakFolderNames)
+            LCTabView()
                 .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
                 .environmentObject(DataManager.shared.model)
                 .environmentObject(LCAppSortManager.shared)
