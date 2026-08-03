@@ -348,7 +348,7 @@ final class ShareExtensionViewModel: ObservableObject {
         let preferredIconURL: URL
         let fallbackIconURL: URL
         let iconStyle = sharedDefaults?.integer(forKey: "LCIconStyle") ?? 0
-        let isDark = iconStyle == 1 || (iconStyle == 2 && UITraitCollection.current.userInterfaceStyle == .dark)
+        let isDark = iconStyle == 1 || (iconStyle == 2 && UITraitCollection.current.userInterfaceStyle == UIUserInterfaceStyle.dark)
         if #available(iOS 18.0, *), isDark {
             preferredIconURL = darkIconURL
             fallbackIconURL = lightIconURL
