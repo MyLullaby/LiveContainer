@@ -1,6 +1,7 @@
 import Combine
 import Foundation
 import LocalAuthentication
+import UIKit
 
 @MainActor
 final class ShareExtensionViewModel: ObservableObject {
