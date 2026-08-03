@@ -64,6 +64,9 @@ class SharedModel: ObservableObject {
     @Published var isJITModalOpen = false
     
     @Published var enableMultipleWindow = false
+
+    @Published var appDataFolderNames: [String] = []
+    @Published var tweakFolderNames: [String] = []
     
     @Published var apps : [LCAppModel] = []
     @Published var hiddenApps : [LCAppModel] = []

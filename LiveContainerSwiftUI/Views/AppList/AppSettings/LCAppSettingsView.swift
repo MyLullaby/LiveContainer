@@ -26,9 +26,6 @@ struct LCAppSettingsView: View {
     
     @ObservedObject private var model : LCAppModel
     
-    @Binding var appDataFolders: [String]
-    @Binding var tweakFolders: [String]
-    
 
     @StateObject private var renameFolderInput = InputHelper()
     @StateObject private var moveToAppGroupAlert = YesNoHelper()
@@ -43,11 +40,9 @@ struct LCAppSettingsView: View {
     
     @EnvironmentObject private var sharedModel : SharedModel
     
-    init(model: LCAppModel, appDataFolders: Binding<[String]>, tweakFolders: Binding<[String]>) {
+    init(model: LCAppModel) {
         self.appInfo = model.appInfo
         self._model = ObservedObject(wrappedValue: model)
-        _appDataFolders = appDataFolders
-        _tweakFolders = tweakFolders
     }
     
     var body: some View {
@@ -72,7 +67,7 @@ struct LCAppSettingsView: View {
                     Menu {
                         Picker(selection: $model.uiTweakFolder , label: Text("")) {
                             Label("lc.common.none".loc, systemImage: "nosign").tag(Optional<String>(nil))
-                            ForEach(tweakFolders, id:\.self) { folderName in
+                            ForEach(sharedModel.tweakFolderNames, id:\.self) { folderName in
                                 Text(folderName).tag(Optional(folderName))
                             }
                         }
@@ -340,6 +335,16 @@ struct LCAppSettingsView: View {
                 Text("lc.appSettings.hideLiveContainerDesc".loc)
             }
             
+            if #available(iOS 16.0, *) {
+                Section {
+                    Toggle(isOn: $model.uiClassicMode) {
+                        Text("lc.appSettings.classicMode".loc)
+                    }
+                } footer: {
+                    Text("lc.appSettings.classicModeDesc".loc)
+                }
+            }
+            
             Section {
                 Toggle(isOn: $model.uiSpoofSDKVersion) {
                     Text("lc.appSettings.spoofSDKVersion".loc)
@@ -482,7 +487,7 @@ struct LCAppSettingsView: View {
             return
         }
         
-        self.appDataFolders.append(newName)
+        sharedModel.appDataFolderNames.append(newName)
         let newContainer = LCContainer(folderName: newName, name: displayName, isShared: model.uiIsShared)
         // assign keychain group
         var keychainGroupSet : Set<Int> = Set(minimumCapacity: 3)
@@ -629,14 +634,14 @@ struct LCAppSettingsView: View {
                 if container.storageBookMark != nil {
                     continue
                 }
-                appDataFolders.removeAll(where: { s in
+                sharedModel.appDataFolderNames.removeAll(where: { s in
                     return s == container.folderName
                 })
                 container.isShared = true
             }
             
             if let tweakFolder = appInfo.tweakFolder, tweakFolder.count > 0 {
-                tweakFolders.removeAll(where: { s in
+                sharedModel.tweakFolderNames.removeAll(where: { s in
                     return s == tweakFolder
                 })
             }
@@ -692,10 +697,10 @@ struct LCAppSettingsView: View {
                 if container.storageBookMark != nil {
                     continue
                 }
-                appDataFolders.append(container.folderName)
+                sharedModel.appDataFolderNames.append(container.folderName)
             }
             if let tweakFolder = appInfo.tweakFolder, tweakFolder.count > 0 {
-                tweakFolders.append(tweakFolder)
+                sharedModel.tweakFolderNames.append(tweakFolder)
                 model.uiTweakFolder = tweakFolder
             }
             

@@ -9,9 +9,6 @@ import Foundation
 import SwiftUI
 
 struct LCTabView: View {
-    @Binding var appDataFolderNames: [String]
-    @Binding var tweakFolderNames: [String]
-    
     @State var errorShow = false
     @State var crashReportShow = false
     @State var errorInfo = ""
@@ -30,7 +27,7 @@ struct LCTabView: View {
     let pub = NotificationCenter.default.publisher(for: UIScene.didDisconnectNotification)
     
     private var appListView: LCAppListView {
-        LCAppListView(appDataFolderNames: $appDataFolderNames, tweakFolderNames: $tweakFolderNames, searchContext: searchContextAppList)
+        LCAppListView(searchContext: searchContextAppList)
     }
     
     private var sourcesView: LCSourcesView {
@@ -52,11 +49,11 @@ struct LCTabView: View {
                     }
                     if DataManager.shared.model.multiLCStatus != 2 {
                         Tab("lc.tabView.tweaks".loc, systemImage: "wrench.and.screwdriver", value: LCTabIdentifier.tweaks) {
-                            LCTweaksView(tweakFolders: $tweakFolderNames)
+                            LCTweaksView()
                         }
                     }
                     Tab("lc.tabView.settings".loc, systemImage: "gearshape.fill", value: LCTabIdentifier.settings) {
-                        LCSettingsView(appDataFolderNames: $appDataFolderNames)
+                        LCSettingsView()
                     }
                     Tab("Search".loc, systemImage: "magnifyingglass", value: LCTabIdentifier.search, role: .search) {
                         if previousSelectedTab == .sources {
@@ -84,14 +81,14 @@ struct LCTabView: View {
                         }
                         .tag(LCTabIdentifier.apps)
                     if DataManager.shared.model.multiLCStatus != 2 {
-                        LCTweaksView(tweakFolders: $tweakFolderNames)
+                        LCTweaksView()
                             .tabItem{
                                 Label("lc.tabView.tweaks".loc, systemImage: "wrench.and.screwdriver")
                             }
                             .tag(LCTabIdentifier.tweaks)
                     }
                     
-                    LCSettingsView(appDataFolderNames: $appDataFolderNames)
+                    LCSettingsView()
                         .tabItem {
                             Label("lc.tabView.settings".loc, systemImage: "gearshape.fill")
                         }
@@ -140,7 +137,7 @@ struct LCTabView: View {
             closeDuplicatedWindow()
             checkLastLaunchError()
             checkTeamId()
-            checkBundleId()
+            checkAndSaveBundleId()
             checkGetTaskAllow()
             checkPrivateContainerBookmark()
         }
@@ -260,7 +257,12 @@ struct LCTabView: View {
         UserDefaults.standard.set(currentTeamId, forKey: "LCCertificateTeamId")
     }
     
-    func checkBundleId() {
+    func checkAndSaveBundleId() {
+        if DataManager.shared.model.multiLCStatus == 2 {
+            let scheme = UserDefaults.lcAppUrlScheme() ?? ""
+            LCUtils.appGroupUserDefault.set(Bundle.main.bundleIdentifier, forKey: "LCBundleID.\(scheme)")
+        }
+        
         if UserDefaults.standard.bool(forKey: "LCBundleIdChecked") {
             return
         }

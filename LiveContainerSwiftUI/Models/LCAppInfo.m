@@ -7,7 +7,6 @@
 #import "LCUtils.h"
 #import "../../LiveContainer/LCSharedUtils.h"
 
-uint32_t dyld_get_sdk_version(const struct mach_header* mh);
 
 @implementation LCAppInfo
 
@@ -423,6 +422,47 @@ uint32_t dyld_get_sdk_version(const struct mach_header* mh);
     _info[@"isJITNeeded"] = [NSNumber numberWithBool:isJITNeeded];
     [self save];
     
+}
+
+- (bool)classicMode {
+    return [_info[@"classicMode"] boolValue];
+}
+
+- (void)setClassicMode:(bool)classicMode {
+    _info[@"classicMode"] = @(classicMode);
+
+    if(classicMode) {
+        [self defaultClassicMode];
+    } else {
+        _info[@"LCClassicModeCache"] = nil;
+        [self save];
+    }
+}
+
+- (NSUInteger)defaultClassicMode {
+    if(!self.classicMode) {
+        return 0;
+    }
+
+    NSInteger systemMajorVersion = NSProcessInfo.processInfo.operatingSystemVersion.majorVersion;
+    NSDictionary *cache = _info[@"LCClassicModeCache"];
+    NSNumber *cachedMode = cache[@"defaultClassicMode"];
+    NSNumber *cachedSystemMajorVersion = cache[@"systemMajorVersion"];
+    if([cachedMode isKindOfClass:NSNumber.class] &&
+       [cachedSystemMajorVersion isKindOfClass:NSNumber.class] &&
+       cachedSystemMajorVersion.integerValue == systemMajorVersion) {
+        return cachedMode.unsignedIntegerValue;
+    }
+
+    NSError *error = nil;
+    NSNumber *mode = LCGetDefaultClassicMode([NSURL fileURLWithPath:self.bundlePath]);
+
+    _info[@"LCClassicModeCache"] = @{
+        @"defaultClassicMode": mode,
+        @"systemMajorVersion": @(systemMajorVersion),
+    };
+    [self save];
+    return mode.unsignedIntegerValue;
 }
 
 - (bool)isLocked {

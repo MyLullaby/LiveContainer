@@ -37,9 +37,6 @@ struct AppReplaceOption : Hashable {
 }
 
 struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
-    @Binding var appDataFolderNames: [String]
-    @Binding var tweakFolderNames: [String]
-    
     @State var didAppear = false
     // ipa choosing stuff
     @State var choosingIPA = false
@@ -119,10 +116,8 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         }
     }
     
-    init(appDataFolderNames: Binding<[String]>, tweakFolderNames: Binding<[String]>, searchContext: SearchContext) {
+    init(searchContext: SearchContext) {
         _installOptions = State(initialValue: [])
-        _appDataFolderNames = appDataFolderNames
-        _tweakFolderNames = tweakFolderNames
         self.searchContext = searchContext
     }
     
@@ -139,7 +134,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                 
                 LazyVStack {
                     ForEach(filteredApps, id: \.self) { app in
-                        LCAppBanner(appModel: app, delegate: self, appDataFolders: $appDataFolderNames, tweakFolders: $tweakFolderNames)
+                        LCAppBanner(appModel: app, delegate: self)
                     }
                     .transition(.scale)
                 }
@@ -157,7 +152,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                                 }
                                 
                                 ForEach(filteredHiddenApps, id: \.self) { app in
-                                    LCAppBanner(appModel: app, delegate: self, appDataFolders: $appDataFolderNames, tweakFolders: $tweakFolderNames)
+                                    LCAppBanner(appModel: app, delegate: self)
                                 }
                                 .transition(.scale)
                                 
@@ -180,7 +175,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                             }
                             ForEach(filteredHiddenApps, id: \.self) { app in
                                 if sharedModel.isHiddenAppUnlocked {
-                                    LCAppBanner(appModel: app, delegate: self, appDataFolders: $appDataFolderNames, tweakFolders: $tweakFolderNames)
+                                    LCAppBanner(appModel: app, delegate: self)
                                 } else {
                                     LCAppSkeletonBanner()
                                 }
@@ -418,6 +413,19 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             guard sharedModel.selectedTab == .apps, let link else { return }
             sharedModel.deepLink = nil
             handleURL(url: link)
+        }
+        .onDrop(of: [.url], isTargeted: nil) { providers in
+            guard let provider = providers.first else { return false }
+            _ = provider.loadObject(ofClass: URL.self) { url, error in
+                guard let url else { return }
+                Task {
+                    guard let urlToOpen = await webViewUrlInput.open(initVal: url.absoluteString), urlToOpen != "" else {
+                        return
+                    }
+                    await openWebView(urlString: urlToOpen)
+                }
+            }
+            return true
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.InstallAppNotification)) { obj in
             if let obj2 = obj.object as? [String: Any], let installUrl = obj2["url"] as? URL {
@@ -742,6 +750,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             finalNewApp.lastLaunched = appToReplace.appInfo.lastLaunched
             finalNewApp.jitLaunchScriptJs = appToReplace.appInfo.jitLaunchScriptJs
             finalNewApp.multitaskSpecified = appToReplace.appInfo.multitaskSpecified
+            finalNewApp.classicMode = appToReplace.appInfo.classicMode
             finalNewApp.autoSaveDisabled = false
             finalNewApp.save()
         } else {
@@ -1072,17 +1081,17 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         }
     }
     
-    func jitLaunch(appName: String) async {
-        await jitLaunch(withScript: "", appName: appName)
+    func jitLaunch(appName: String, classicMode: UInt) async {
+        await jitLaunch(withScript: "", appName: appName, classicMode: classicMode)
     }
 
-    func jitLaunch(withScript script: String, appName: String) async {
+    func jitLaunch(withScript script: String, appName: String, classicMode: UInt) async {
         await MainActor.run {
             jitLog = ""
         }
         let enableJITTask = Task {
             
-            let _ = await LCUtils.askForJIT(withScript: script, appName: appName) { newMsg in
+            let _ = await LCUtils.askForJIT(withScript: script, appName: appName, classicMode: classicMode) { newMsg in
                 Task { await MainActor.run {
                     self.jitLog += "\(newMsg)\n"
                 }}
@@ -1096,7 +1105,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             enableJITTask.cancel()
             return
         }
-        LCSharedUtils.launchToGuestApp()
+        LCSharedUtils.launchToGuestApp(withClassicMode: classicMode)
 
     }
     
