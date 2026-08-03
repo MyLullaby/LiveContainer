@@ -79,7 +79,8 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     @EnvironmentObject private var sharedAppSortManager : LCAppSortManager
     
     @AppStorage("LCMultitaskMode", store: LCUtils.appGroupUserDefault) var multitaskMode: MultitaskMode = .virtualWindow
-    @AppStorage("darkModeIcon", store: LCUtils.appGroupUserDefault) private var darkModeIcon = false
+    @AppStorage("LCIconStyle", store: LCUtils.appGroupUserDefault) private var iconStyle = 0
+    @Environment(\.colorScheme) private var colorScheme
     
     @State private var isViewAppeared = false
     
@@ -239,7 +240,8 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                         Button {
                             LCUtils.openSideStore(delegate: self)
                         } label: {
-                            IconImageView(icon: BuiltInSideStoreAppInfo.shared.iconIsDarkIcon(darkModeIcon))
+                            let isDark = iconStyle == 1 || (iconStyle == 2 && colorScheme == .dark)
+                            IconImageView(icon: BuiltInSideStoreAppInfo.shared.iconIsDarkIcon(isDark))
                                 .frame(width: UIFont.preferredFont(forTextStyle: .body).lineHeight, height: UIFont.preferredFont(forTextStyle: .body).lineHeight)
 
                         }

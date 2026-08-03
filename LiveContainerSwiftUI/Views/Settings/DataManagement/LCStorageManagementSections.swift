@@ -225,7 +225,8 @@ struct LCStorageSummarySection: View {
 }
 
 struct LCInstalledAppsSection: View {
-    @AppStorage("darkModeIcon", store: LCUtils.appGroupUserDefault) var darkModeIcon = false
+    @AppStorage("LCIconStyle", store: LCUtils.appGroupUserDefault) var iconStyle = 0
+    @Environment(\.colorScheme) private var colorScheme
     let breakdown: LCStorageBreakdown?
 
     var body: some View {
@@ -253,7 +254,8 @@ struct LCInstalledAppsSection: View {
             LCAppStorageDetailView(appItem: appItem)
         } label: {
             HStack(spacing: 12) {
-                IconImageView(icon: appItem.appModel.appInfo.iconIsDarkIcon(darkModeIcon))
+                let isDark = iconStyle == 1 || (iconStyle == 2 && colorScheme == .dark)
+                IconImageView(icon: appItem.appModel.appInfo.iconIsDarkIcon(isDark))
                     .frame(width: 28, height: 28)
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -286,11 +288,13 @@ private struct LCAppStorageSummaryHeaderView: View {
     let appItem: LCAppStorageItem
 
     @ScaledMetric(relativeTo: .title) private var iconSize: CGFloat = 58
-    @AppStorage("darkModeIcon", store: LCUtils.appGroupUserDefault) var darkModeIcon = false
+    @AppStorage("LCIconStyle", store: LCUtils.appGroupUserDefault) var iconStyle = 0
+    @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
-            IconImageView(icon: appItem.appModel.appInfo.iconIsDarkIcon(darkModeIcon))
+            let isDark = iconStyle == 1 || (iconStyle == 2 && colorScheme == .dark)
+            IconImageView(icon: appItem.appModel.appInfo.iconIsDarkIcon(isDark))
                 .frame(width: iconSize, height: iconSize)
 
             VStack(alignment: .leading) {
