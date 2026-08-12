@@ -608,11 +608,30 @@ struct LCSettingsView: View {
                 }
                 
                 guard let data = item as? Data else {
-                    errorInfo = "Failed to decode password data"
+                    errorInfo = "Failed to decode certificate data"
                     errorShow = true
                     return
                 }
-                onSideStoreCertificateCallback(certificateData: data, password: "")
+                
+                let passwordQuery: [String: Any] = [
+                    kSecClass as String: kSecClassGenericPassword,
+                    kSecAttrAccount as String: "signingCertificatePassword",
+                    kSecReturnData as String: true,
+                    kSecMatchLimit as String: kSecMatchLimitOne,
+                    kSecAttrService as String: "com.kdt.livecontainer",
+                    kSecAttrSynchronizable as String: kSecAttrSynchronizableAny
+                ]
+                
+                var passwordItem: CFTypeRef?
+                let passwordStatus = SecItemCopyMatching(passwordQuery as CFDictionary, &passwordItem)
+                var password = ""
+                if passwordStatus == errSecSuccess,
+                   let passwordData = passwordItem as? Data,
+                   let pwd = String(data: passwordData, encoding: .utf8) {
+                    password = pwd
+                }
+                
+                onSideStoreCertificateCallback(certificateData: data, password: password)
                 
                 return
             }
