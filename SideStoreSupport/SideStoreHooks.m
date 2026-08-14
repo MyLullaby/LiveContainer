@@ -159,7 +159,7 @@ static void SSInstallVersionWindow(UIWindowScene *windowScene)
     rootController.view.backgroundColor = UIColor.clearColor;
     [rootController.view addSubview:versionLabel];
     
-    if(rootController.view.safeAreaInsets.bottom == 0) {
+    if(windowScene.keyWindow.safeAreaInsets.bottom == 0) {
         // old devices with no bottom safe area
         [NSLayoutConstraint activateConstraints:@[
             [versionLabel.centerXAnchor constraintEqualToAnchor:rootController.view.centerXAnchor],
