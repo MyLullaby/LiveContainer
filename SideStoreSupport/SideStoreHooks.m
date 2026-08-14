@@ -7,6 +7,7 @@
 #include "../LiveContainer/utils.h"
 #include "../LiveContainer/LCSharedUtils.h"
 #include "XPCServer.h"
+#import <sys/sysctl.h>
 @import UserNotifications;
 @import UIKit;
 
@@ -17,6 +18,21 @@
 
 - (UNAuthorizationStatus)authorizationStatus {
     return UNAuthorizationStatusAuthorized;
+}
+
+@end
+
+static NSMutableDictionary<NSString *, UIWindow *> *SSVersionWindows;
+static id SSSceneObserver;
+
+@interface PassthroughWindow : UIWindow
+@end
+
+@implementation PassthroughWindow
+
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event
+{
+    return nil;
 }
 
 @end
@@ -51,6 +67,10 @@
 @implementation NSBundle(SideStoreHooks)
 
 + (NSString*)hook_appbundleIdentifier {
+    return @"com.kdt.livecontainer";
+}
+
++ (NSString*)hook_storeAppBundleIdentifier {
     return @"com.kdt.livecontainer";
 }
 
@@ -102,44 +122,74 @@ void SideStoreMyAppsViewController_hook_escapeButtonTapped(UICollectionViewContr
 }
 
 
-@implementation UITabBarController(hook)
 
-- (void)hook_viewDidLoad {
-    [self hook_viewDidLoad];
-    
-    static char SideStoreVersionLabelKey;
-    if (objc_getAssociatedObject(self, &SideStoreVersionLabelKey)) {
+
+
+static void SSInstallVersionWindow(UIWindowScene *windowScene)
+{
+    NSString *identifier = windowScene.session.persistentIdentifier;
+    if (identifier.length == 0 || SSVersionWindows[identifier] != nil) {
         return;
     }
-
+    
+    
     NSString* LCVersion = [NSString stringWithFormat:@"%@-%@",
                          NSUserDefaults.lcMainBundle.infoDictionary[@"CFBundleShortVersionString"],
                          NSUserDefaults.lcMainBundle.infoDictionary[@"LCVersionInfo"]];
     
     NSString* SSVersion = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
+    
+    NSString *osVersion = [[UIDevice currentDevice] systemVersion];
+    size_t size = 32;
+    char iosBuild[32];
+    sysctlbyname("kern.osversion", iosBuild, &size, NULL, 0);
+    NSString* allVersionString = [NSString stringWithFormat:@"LC %@, SS %@\niOS %@ (%s)", LCVersion, SSVersion, osVersion, iosBuild];
 
     UILabel* versionLabel = [UILabel new];
     versionLabel.translatesAutoresizingMaskIntoConstraints = NO;
     versionLabel.font = [UIFont systemFontOfSize:9 weight:UIFontWeightRegular];
-    versionLabel.textColor = UIColor.secondaryLabelColor;
+    versionLabel.textColor = UIColor.labelColor;
     versionLabel.textAlignment = NSTextAlignmentCenter;
     versionLabel.userInteractionEnabled = NO;
-    versionLabel.text = [NSString stringWithFormat:@"LC %@, SS %@", LCVersion, SSVersion];
+    versionLabel.text = allVersionString;
+    versionLabel.numberOfLines = 0;
+    versionLabel.lineBreakMode = NSLineBreakByWordWrapping;
+    
+    UIViewController *rootController = [[UIViewController alloc] init];
+    rootController.view.backgroundColor = UIColor.clearColor;
+    [rootController.view addSubview:versionLabel];
+    
+    if(rootController.view.safeAreaInsets.bottom == 0) {
+        // old devices with no bottom safe area
+        [NSLayoutConstraint activateConstraints:@[
+            [versionLabel.centerXAnchor constraintEqualToAnchor:rootController.view.centerXAnchor],
+            [versionLabel.topAnchor constraintEqualToAnchor: rootController.view.safeAreaLayoutGuide.topAnchor]
+        ]];
+    } else {
+        // new devices
+        [NSLayoutConstraint activateConstraints:@[
+            [versionLabel.centerXAnchor constraintEqualToAnchor:rootController.view.centerXAnchor],
+            [versionLabel.bottomAnchor constraintEqualToAnchor: rootController.view.safeAreaLayoutGuide.bottomAnchor
+                                                      constant:UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPhone ? 22 : 0]
+        ]];
+    }
+    PassthroughWindow *window = [[PassthroughWindow alloc] initWithWindowScene:windowScene];
 
-    [self.view addSubview:versionLabel];
-    [NSLayoutConstraint activateConstraints:@[
-        [versionLabel.centerXAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.centerXAnchor],
-        [versionLabel.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:13],
-    ]];
-    objc_setAssociatedObject(self, &SideStoreVersionLabelKey, versionLabel, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    window.rootViewController = rootController;
+    window.backgroundColor = UIColor.clearColor;
+
+    window.windowLevel = UIWindowLevelAlert;
+
+    window.hidden = NO;
+
+    SSVersionWindows[identifier] = window;
 }
-
-@end
 
 
 void installSideStoreHooks(void) {
 
     swizzleClassMethod(NSBundle.class, @selector(appbundleIdentifier), @selector(hook_appbundleIdentifier));
+    swizzleClassMethod(NSBundle.class, @selector(storeAppBundleIdentifier), @selector(hook_storeAppBundleIdentifier));
     swizzle(NSBundle.class, @selector(altstoreAppGroup), @selector(hook_altstoreAppGroup));
     swizzleClassMethod(NSBundle.class, @selector(activeBundle), @selector(hook_activeBundle));
     
@@ -155,7 +205,22 @@ void installSideStoreHooks(void) {
         class_addMethod(PrivClass(MyAppsViewController), @selector(escapeButtonTapped:), (IMP)SideStoreMyAppsViewController_hook_escapeButtonTapped, "v@:@");
         
         // add version number
-        swizzle(UITabBarController.class, @selector(viewDidLoad), @selector(hook_viewDidLoad));
+        SSVersionWindows = [NSMutableDictionary dictionary];
+
+        SSSceneObserver =
+        [NSNotificationCenter.defaultCenter addObserverForName:UISceneDidActivateNotification
+                                                        object:nil
+                                                         queue:NSOperationQueue.mainQueue
+                                                    usingBlock:^(NSNotification *notification) {
+            UIScene *scene = notification.object;
+            
+            if ([scene isKindOfClass:UIWindowScene.class]) {
+                SSInstallVersionWindow((UIWindowScene *)scene);
+            }
+        }];
+        
+        
+        
     }
     
 
