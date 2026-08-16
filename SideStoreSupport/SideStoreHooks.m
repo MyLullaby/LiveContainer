@@ -78,6 +78,10 @@ static id SSSceneObserver;
     return LCSharedUtils.appGroupID;
 }
 
++ (NSString*)hook_baseAltStoreAppGroupID {
+    return @"group.com.SideStore.SideStore";
+}
+
 + (NSBundle*)hook_activeBundle {
     if (!NSUserDefaults.isLiveProcess) return NSUserDefaults.lcMainBundle;
     
@@ -143,7 +147,8 @@ static void SSInstallVersionWindow(UIWindowScene *windowScene)
     size_t size = 32;
     char iosBuild[32];
     sysctlbyname("kern.osversion", iosBuild, &size, NULL, 0);
-    NSString* allVersionString = [NSString stringWithFormat:@"LC %@, SS %@\niOS %@ (%s)", LCVersion, SSVersion, osVersion, iosBuild];
+    bool isPhone = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPhone;
+    NSString* allVersionString = [NSString stringWithFormat:isPhone ? @"LC %@, SS %@\niOS %@ (%s)" : @"LC %@, SS %@, iOS %@ (%s)", LCVersion, SSVersion, osVersion, iosBuild];
 
     UILabel* versionLabel = [UILabel new];
     versionLabel.translatesAutoresizingMaskIntoConstraints = NO;
@@ -170,7 +175,7 @@ static void SSInstallVersionWindow(UIWindowScene *windowScene)
         [NSLayoutConstraint activateConstraints:@[
             [versionLabel.centerXAnchor constraintEqualToAnchor:rootController.view.centerXAnchor],
             [versionLabel.bottomAnchor constraintEqualToAnchor: rootController.view.safeAreaLayoutGuide.bottomAnchor
-                                                      constant:UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPhone ? 22 : 0]
+                                                      constant: isPhone ? 22 : 0]
         ]];
     }
     PassthroughWindow *window = [[PassthroughWindow alloc] initWithWindowScene:windowScene];
@@ -192,6 +197,7 @@ void installSideStoreHooks(void) {
     swizzleClassMethod(NSBundle.class, @selector(storeAppBundleIdentifier), @selector(hook_storeAppBundleIdentifier));
     swizzle(NSBundle.class, @selector(altstoreAppGroup), @selector(hook_altstoreAppGroup));
     swizzleClassMethod(NSBundle.class, @selector(activeBundle), @selector(hook_activeBundle));
+    swizzleClassMethod(NSBundle.class, @selector(baseAltStoreAppGroupID), @selector(hook_baseAltStoreAppGroupID));
     
     // replace altStoreSourceURL
     Method altStoreSourceURLMethod = class_getClassMethod(PrivClass(Source), @selector(altStoreSourceURL));
