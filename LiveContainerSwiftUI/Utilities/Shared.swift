@@ -88,10 +88,6 @@ class SharedModel: ObservableObject {
         return false
     }()
     
-    static let isLiquidGlassSearchEnabled = {
-            return isLiquidGlassEnabled && UIDevice.current.userInterfaceIdiom == .phone
-    }()
-    
     var mainWindowOpened = false
     
     public static let keychainAccessGroupCount = 128
@@ -316,7 +312,6 @@ public enum LCTabIdentifier: Hashable {
     case apps
     case tweaks
     case settings
-    case search
 }
 
 
