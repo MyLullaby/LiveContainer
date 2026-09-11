@@ -41,7 +41,8 @@ mv ./tmp/SideStoreSupport.framework Payload/LiveContainer.app/Frameworks
 
 # download SideStore
 cd tmp
-wget https://github.com/MyLullaby/SideStore/releases/download/nightly/SideStore.ipa
+wget https://github.com/MyLullaby/SideStore/releases/download/lc-auth-fix/SideStore.ipa
+echo "7a9eb55fa25a23d0d4b28c60ea1cd176c73a8a4b7e7b221e352204feedd42e94  SideStore.ipa" | shasum -a 256 -c - || exit 1
 unzip SideStore.ipa
 cd ..
 
