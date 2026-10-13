@@ -7,6 +7,7 @@
 + (NSString *)certificatePassword;
 + (BOOL)launchToGuestAppWithClassicMode:(NSUInteger)classicMode;
 + (BOOL)launchToGuestAppWithURL:(NSURL *)url;
++ (BOOL)handleReturnToLibraryURL:(NSURL *)url NS_SWIFT_NAME(handleReturnToLibraryURL(_:));
 + (void)setWebPageUrlForNextLaunch:(NSString*)urlString;
 + (BOOL)isLCSchemeInUse:(NSString*)lc;
 + (NSString*)getContainerUsingLCSchemeWithFolderName:(NSString*)folderName;

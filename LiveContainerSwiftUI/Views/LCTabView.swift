@@ -115,6 +115,10 @@ struct LCTabView: View {
     }
     
     func dispatchURL(url: URL) {
+        if LCSharedUtils.handleReturnToLibraryURL(url) {
+            sharedModel.selectedTab = .apps
+            return
+        }
         repeat {
             if url.isFileURL {
                 sharedModel.selectedTab = .apps

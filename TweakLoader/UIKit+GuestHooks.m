@@ -417,6 +417,10 @@ static LCControlAppURLHandling LCHandleControlAppURL(NSURL *url, NSString** modi
         return LCControlAppURLHandlingPassThrough;
     }
 
+    if ([NSClassFromString(@"LCSharedUtils") handleReturnToLibraryURL:url]) {
+        return LCControlAppURLHandlingStop;
+    }
+
     // pass through sidestore urls
     if(NSUserDefaults.isSideStore && ![url.scheme isEqualToString:@"livecontainer"]) {
         return LCControlAppURLHandlingPassThrough;
@@ -543,6 +547,10 @@ static LCControlAppURLHandling LCHandleControlAppURL(NSURL *url, NSString** modi
     NSString* urlStr;
         
     if(!decodedUrlStr && context.payload && (urlStr = context.payload[UIApplicationLaunchOptionsURLKey])) {
+        if ([NSClassFromString(@"LCSharedUtils") handleReturnToLibraryURL:[NSURL URLWithString:urlStr]]) {
+            context.payload = nil;
+            context.actions = nil;
+        }
         do {
             if([urlStr hasPrefix:[NSString stringWithFormat: @"%@://open-url", NSUserDefaults.lcAppUrlScheme]]) {
                 NSURLComponents* lcUrl = [NSURLComponents componentsWithString:urlStr];

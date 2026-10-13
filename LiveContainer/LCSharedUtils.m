@@ -169,6 +169,21 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
     return YES;
 }
 
++ (BOOL)handleReturnToLibraryURL:(NSURL *)url {
+    if (![url.scheme isEqualToString:NSUserDefaults.lcAppUrlScheme]) return NO;
+    if (![url.host isEqualToString:@"return-to-library"]) return NO;
+    if (NSUserDefaults.isLiveProcess) return YES;
+
+    if (!NSUserDefaults.lcGuestAppId) return YES;
+    [lcUserDefaults setObject:@"ui" forKey:@"selected"];
+    [lcUserDefaults removeObjectForKey:@"selectedContainer"];
+    [lcUserDefaults removeObjectForKey:@"launchAppUrlScheme"];
+    [lcUserDefaults setBool:NO forKey:@"LCOpenSideStore"];
+    [lcUserDefaults synchronize];
+    [self launchToGuestAppWithClassicMode:0];
+    return YES;
+}
+
 + (BOOL)launchToGuestAppWithURL:(NSURL *)url {
     NSURLComponents* components = [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
     if(![components.host isEqualToString:@"livecontainer-launch"]) return NO;
