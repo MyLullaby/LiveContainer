@@ -162,7 +162,7 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
         [workspace openApplicationWithBundleIdentifier:NSUserDefaults.lcMainBundle.bundleIdentifier
                                          configuration:configuration
                                      completionHandler:^(BOOL success, NSError* error) {
-            NSLog(@"success=%d error=%@", success, error);
+            NSLog(@"[LC] Relaunch callback: bundle=%@ success=%d error=%@", NSUserDefaults.lcMainBundle.bundleIdentifier, success, error);
             completionHandler(success);
         }];
     }
@@ -172,6 +172,7 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
 + (BOOL)handleReturnToLibraryURL:(NSURL *)url {
     if (![url.scheme isEqualToString:NSUserDefaults.lcAppUrlScheme]) return NO;
     if (![url.host isEqualToString:@"return-to-library"]) return NO;
+    NSLog(@"[LC] Return-to-library received: scheme=%@ guest=%@ liveProcess=%d", NSUserDefaults.lcAppUrlScheme, NSUserDefaults.lcGuestAppId, NSUserDefaults.isLiveProcess);
     if (NSUserDefaults.isLiveProcess) return YES;
 
     if (!NSUserDefaults.lcGuestAppId) return YES;

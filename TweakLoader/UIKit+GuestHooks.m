@@ -523,9 +523,18 @@ static LCControlAppURLHandling LCHandleControlAppURL(NSURL *url, NSString** modi
 }
 
 // Handler for AppDelegate
+static NSURL *LCURLFromPayload(id value) {
+    if ([value isKindOfClass:NSURL.class]) return value;
+    if ([value isKindOfClass:NSString.class]) return [NSURL URLWithString:value];
+    return nil;
+}
+
 @implementation UIApplication(LiveContainerHook)
 - (void)hook__applicationOpenURLAction:(id)action payload:(NSDictionary *)payload origin:(id)origin {
-    NSURL *url = [NSURL URLWithString:payload[UIApplicationLaunchOptionsURLKey]];
+    NSURL *url = LCURLFromPayload(payload[UIApplicationLaunchOptionsURLKey]);
+    if (!url && [action isKindOfClass:UIOpenURLAction.class]) {
+        url = ((UIOpenURLAction *)action).url;
+    }
     NSString* replacementURLString = nil;
     LCControlAppURLHandling decision = LCHandleControlAppURL(url, &replacementURLString);
     if(decision == LCControlAppURLHandlingStop) {
@@ -544,12 +553,32 @@ static LCControlAppURLHandling LCHandleControlAppURL(NSURL *url, NSString** modi
 #if !TARGET_OS_MACCATALYST
     NSString* decodedUrlStr = launchURLProcessed ? nil : NSUserDefaults.lcLaunchURL;
     launchURLProcessed = YES;
-    NSString* urlStr;
-        
-    if(!decodedUrlStr && context.payload && (urlStr = context.payload[UIApplicationLaunchOptionsURLKey])) {
+    NSString *urlStr = LCURLFromPayload(context.payload[UIApplicationLaunchOptionsURLKey]).absoluteString;
+    // A newly connected scene can carry its URL only in actions, without a payload dictionary.
+    if (!decodedUrlStr && !urlStr) {
+        for (id action in context.actions) {
+            if ([action isKindOfClass:UIOpenURLAction.class]) {
+                urlStr = ((UIOpenURLAction *)action).url.absoluteString;
+                break;
+            }
+        }
+    }
+
+    if(!decodedUrlStr && urlStr) {
         if ([NSClassFromString(@"LCSharedUtils") handleReturnToLibraryURL:[NSURL URLWithString:urlStr]]) {
-            context.payload = nil;
-            context.actions = nil;
+            NSMutableDictionary *payload = context.payload.mutableCopy;
+            [payload removeObjectForKey:UIApplicationLaunchOptionsURLKey];
+            context.payload = payload;
+            NSMutableSet *actions = context.actions.mutableCopy;
+            for (id action in context.actions) {
+                if ([action isKindOfClass:UIOpenURLAction.class] &&
+                    [((UIOpenURLAction *)action).url.absoluteString isEqualToString:urlStr]) {
+                    [actions removeObject:action];
+                }
+            }
+            context.actions = actions;
+            [self hook__connectUISceneFromFBSScene:scene transitionContext:context];
+            return;
         }
         do {
             if([urlStr hasPrefix:[NSString stringWithFormat: @"%@://open-url", NSUserDefaults.lcAppUrlScheme]]) {
