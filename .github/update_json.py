@@ -332,7 +332,7 @@ Nightly build from [{commit_sha}](https://github.com/LiveContainer/LiveContainer
 
 
 def main():
-    repo_url = "LiveContainer/LiveContainer"
+    repo_url = os.environ.get("GITHUB_REPOSITORY", "LiveContainer/LiveContainer")
     is_nightly = "NIGHTLY_LINK" in os.environ
 
     try:
