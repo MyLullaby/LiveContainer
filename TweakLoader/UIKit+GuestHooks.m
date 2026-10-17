@@ -417,7 +417,7 @@ static LCControlAppURLHandling LCHandleControlAppURL(NSURL *url, NSString** modi
         return LCControlAppURLHandlingPassThrough;
     }
 
-    if ([NSClassFromString(@"LCSharedUtils") handleReturnToLibraryURL:url]) {
+    if ([NSClassFromString(@"LCSharedUtils") handleReturnToLibraryURL:url] != LCReturnToLibraryResultNotHandled) {
         return LCControlAppURLHandlingStop;
     }
 
@@ -565,7 +565,7 @@ static NSURL *LCURLFromPayload(id value) {
     }
 
     if(!decodedUrlStr && urlStr) {
-        if ([NSClassFromString(@"LCSharedUtils") handleReturnToLibraryURL:[NSURL URLWithString:urlStr]]) {
+        if ([NSClassFromString(@"LCSharedUtils") handleReturnToLibraryURL:[NSURL URLWithString:urlStr]] != LCReturnToLibraryResultNotHandled) {
             NSMutableDictionary *payload = context.payload.mutableCopy;
             [payload removeObjectForKey:UIApplicationLaunchOptionsURLKey];
             context.payload = payload;

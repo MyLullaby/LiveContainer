@@ -115,11 +115,13 @@ struct LCTabView: View {
     }
     
     func dispatchURL(url: URL) {
-        if LCSharedUtils.handleReturnToLibraryURL(url) {
+        let returnResult = LCSharedUtils.handleReturnToLibraryURL(url)
+        if returnResult != .notHandled {
             sharedModel.selectedTab = .apps
             if #available(iOS 16.0, *) {
                 MultitaskDockManager.shared.minimizeAllWindows()
             }
+            // .restart terminates this process, so nothing is left to update.
             return
         }
         repeat {

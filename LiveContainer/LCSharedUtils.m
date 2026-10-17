@@ -169,9 +169,17 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
     return YES;
 }
 
-+ (BOOL)handleReturnToLibraryURL:(NSURL *)url {
-    if (![url.scheme isEqualToString:NSUserDefaults.lcAppUrlScheme]) return NO;
-    if (![url.host isEqualToString:@"return-to-library"]) return NO;
++ (BOOL)isReturnToLibraryURL:(NSURL *)url {
+    // Compare against this instance's own scheme so that LiveContainer2 only
+    // reacts to livecontainer2://return-to-library and never takes over the URL
+    // addressed to another installed instance.
+    return [url.scheme isEqualToString:NSUserDefaults.lcAppUrlScheme] &&
+           [url.host isEqualToString:@"return-to-library"];
+}
+
++ (LCReturnToLibraryResult)handleReturnToLibraryURL:(NSURL *)url {
+    if (![self isReturnToLibraryURL:url]) return LCReturnToLibraryResultNotHandled;
+
     NSLog(@"[LC] Return-to-library received: scheme=%@ guest=%@ liveProcess=%d", NSUserDefaults.lcAppUrlScheme, NSUserDefaults.lcGuestAppId, NSUserDefaults.isLiveProcess);
     if (NSUserDefaults.isLiveProcess) {
         // The library belongs to the host, not this extension's process or defaults.
@@ -181,17 +189,23 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
                 NSLog(@"[LC] Return-to-library forwarded to host: success=%d", success);
             }];
         });
-        return YES;
+        return LCReturnToLibraryResultShowAppList;
     }
 
-    if (!NSUserDefaults.lcGuestAppId) return YES;
+    // No guest loaded means this instance is already showing the library, so the
+    // app list can be revealed in place. Restarting here would only cost a cold
+    // launch and could not possibly return a different screen.
+    if (!NSUserDefaults.lcGuestAppId) return LCReturnToLibraryResultShowAppList;
+
+    // A guest app owns this process: reset the per-instance launch state so the
+    // relaunch lands on the library, then terminate and come back.
     [lcUserDefaults setObject:@"ui" forKey:@"selected"];
     [lcUserDefaults removeObjectForKey:@"selectedContainer"];
     [lcUserDefaults removeObjectForKey:@"launchAppUrlScheme"];
     [lcUserDefaults setBool:NO forKey:@"LCOpenSideStore"];
     [lcUserDefaults synchronize];
     [self launchToGuestAppWithClassicMode:0];
-    return YES;
+    return LCReturnToLibraryResultRestart;
 }
 
 + (BOOL)launchToGuestAppWithURL:(NSURL *)url {
