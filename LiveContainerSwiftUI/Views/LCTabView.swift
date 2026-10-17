@@ -110,17 +110,20 @@ struct LCTabView: View {
             }
         }
         .onOpenURL { url in
+            NSLog("[LC][RTL] onOpenURL fired: %@", url.absoluteString)
             dispatchURL(url: url)
         }
     }
     
     func dispatchURL(url: URL) {
         let returnResult = LCSharedUtils.handleReturnToLibraryURL(url)
+        NSLog("[LC][RTL] dispatchURL result=%@ url=%@", String(describing: returnResult), url.absoluteString)
         if returnResult != .notHandled {
             sharedModel.selectedTab = .apps
             if #available(iOS 16.0, *) {
                 MultitaskDockManager.shared.minimizeAllWindows()
             }
+            NSLog("[LC][RTL] switched to apps tab")
             // .restart terminates this process, so nothing is left to update.
             return
         }

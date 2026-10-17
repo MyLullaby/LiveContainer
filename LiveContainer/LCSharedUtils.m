@@ -178,13 +178,20 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
 }
 
 + (LCReturnToLibraryResult)handleReturnToLibraryURL:(NSURL *)url {
-    if (![self isReturnToLibraryURL:url]) return LCReturnToLibraryResultNotHandled;
+    NSLog(@"[LC][RTL] enter url=%@ myScheme=%@ myBundle=%@ guest=%@ liveProcess=%d",
+          url.absoluteString, NSUserDefaults.lcAppUrlScheme,
+          NSBundle.mainBundle.bundleIdentifier, NSUserDefaults.lcGuestAppId, NSUserDefaults.isLiveProcess);
+    if (![self isReturnToLibraryURL:url]) {
+        NSLog(@"[LC][RTL] not handled: scheme mismatch (url.scheme=%@ mine=%@)", url.scheme, NSUserDefaults.lcAppUrlScheme);
+        return LCReturnToLibraryResultNotHandled;
+    }
 
     NSLog(@"[LC] Return-to-library received: scheme=%@ guest=%@ liveProcess=%d", NSUserDefaults.lcAppUrlScheme, NSUserDefaults.lcGuestAppId, NSUserDefaults.isLiveProcess);
     if (NSUserDefaults.isLiveProcess) {
         // The library belongs to the host, not this extension's process or defaults.
         dispatch_async(dispatch_get_main_queue(), ^{
             UIApplication *application = [NSClassFromString(@"UIApplication") sharedApplication];
+            NSLog(@"[LC][RTL] liveProcess: forwarding to host");
             [application openURL:url options:@{} completionHandler:^(BOOL success) {
                 NSLog(@"[LC] Return-to-library forwarded to host: success=%d", success);
             }];
@@ -195,10 +202,14 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
     // No guest loaded means this instance is already showing the library, so the
     // app list can be revealed in place. Restarting here would only cost a cold
     // launch and could not possibly return a different screen.
-    if (!NSUserDefaults.lcGuestAppId) return LCReturnToLibraryResultShowAppList;
+    if (!NSUserDefaults.lcGuestAppId) {
+        NSLog(@"[LC][RTL] library in place: ShowAppList (no restart)");
+        return LCReturnToLibraryResultShowAppList;
+    }
 
     // A guest app owns this process: reset the per-instance launch state so the
     // relaunch lands on the library, then terminate and come back.
+    NSLog(@"[LC][RTL] guest running: clearing state and restarting");
     [lcUserDefaults setObject:@"ui" forKey:@"selected"];
     [lcUserDefaults removeObjectForKey:@"selectedContainer"];
     [lcUserDefaults removeObjectForKey:@"launchAppUrlScheme"];
