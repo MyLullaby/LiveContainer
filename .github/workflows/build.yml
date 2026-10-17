@@ -4,11 +4,6 @@ on:
   push:
   pull_request:
   workflow_dispatch:
-    inputs: 
-      release__nightly:
-        description: Create a nightly release
-        type: boolean
-        required: false
 
 jobs:
   build:
@@ -81,64 +76,3 @@ jobs:
         with:
           name: ${{ env.scheme }}+SideStore.ipa
           path: ${{ env.scheme }}+SideStore.ipa
-
-  release__nightly:
-    name: Nightly Release
-    permissions:
-      contents: write
-    if: inputs.release__nightly || github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-    runs-on: ubuntu-latest
-    needs: [build]
-    concurrency:
-      group: release__nightly
-      cancel-in-progress: true
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-      - name: Download a Build Artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ needs.build.outputs.artifact }}
-      - name: Download a Build Artifact2
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ needs.build.outputs.artifact2 }}
-      - name: Get Commit Info
-        id: commit_info
-        run: |
-          COMMIT_SHA=$(git rev-parse HEAD)
-          COMMIT_MSG=$(git log -1 --pretty=%s)
-          echo "COMMIT_SHA=$COMMIT_SHA" >> $GITHUB_ENV
-          echo "COMMIT_MSG=$COMMIT_MSG" >> $GITHUB_ENV
-      - name: Update AltStore source
-        id: update_source
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NIGHTLY_LINK: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
-          commit_sha: ${{ env.COMMIT_SHA }}
-          commit_msg: ${{ env.COMMIT_MSG }}
-        run: |
-          python .github/update_json.py
-      - name: Nightly Release
-        uses: andelf/nightly-release@5834076edc55cc05975561c9722043f072ac5c26
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with: 
-          body: |
-            **Commit:** [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
-            **Message:** ${{ github.event.head_commit.message }}
-            
-            This is a nightly release [created automatically with GitHub Actions workflow](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}).
-          files: |
-            ${{ needs.build.outputs.artifact }}
-            ${{ needs.build.outputs.artifact2 }}
-            .github/apps_nightly.json
-      - name: Update apps.json in Release 1.0
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: "1.0"
-          files: |
-            .github/apps_ss_lc.json
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
