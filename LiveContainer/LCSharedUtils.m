@@ -173,7 +173,16 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
     if (![url.scheme isEqualToString:NSUserDefaults.lcAppUrlScheme]) return NO;
     if (![url.host isEqualToString:@"return-to-library"]) return NO;
     NSLog(@"[LC] Return-to-library received: scheme=%@ guest=%@ liveProcess=%d", NSUserDefaults.lcAppUrlScheme, NSUserDefaults.lcGuestAppId, NSUserDefaults.isLiveProcess);
-    if (NSUserDefaults.isLiveProcess) return YES;
+    if (NSUserDefaults.isLiveProcess) {
+        // The library belongs to the host, not this extension's process or defaults.
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIApplication *application = [NSClassFromString(@"UIApplication") sharedApplication];
+            [application openURL:url options:@{} completionHandler:^(BOOL success) {
+                NSLog(@"[LC] Return-to-library forwarded to host: success=%d", success);
+            }];
+        });
+        return YES;
+    }
 
     if (!NSUserDefaults.lcGuestAppId) return YES;
     [lcUserDefaults setObject:@"ui" forKey:@"selected"];

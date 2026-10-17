@@ -117,6 +117,9 @@ struct LCTabView: View {
     func dispatchURL(url: URL) {
         if LCSharedUtils.handleReturnToLibraryURL(url) {
             sharedModel.selectedTab = .apps
+            if #available(iOS 16.0, *) {
+                MultitaskDockManager.shared.minimizeAllWindows()
+            }
             return
         }
         repeat {
