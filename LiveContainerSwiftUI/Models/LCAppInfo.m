@@ -523,7 +523,7 @@
     }
 }
 - (void)setDontInjectTweakLoader:(bool)dontInjectTweakLoader {
-    if([_info[@"dontInjectTweakLoader"] boolValue] == dontInjectTweakLoader) {
+    if(_info[@"dontInjectTweakLoader"] != nil && self.dontInjectTweakLoader == dontInjectTweakLoader) {
         return;
     }
     
