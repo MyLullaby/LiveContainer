@@ -62,6 +62,11 @@ class LCAppModel: ObservableObject, Hashable {
             appInfo.fixLocalNotification = uiFixLocalNotification
         }
     }
+    @Published var uiFixCommonSectionAlignment : Bool {
+        didSet {
+            appInfo.fixCommonSectionAlignment = uiFixCommonSectionAlignment
+        }
+    }
     
     @Published var uiHideLiveContainer : Bool {
         didSet {
@@ -182,6 +187,7 @@ class LCAppModel: ObservableObject, Hashable {
         self.uiUseLCBundleId = appInfo.doUseLCBundleId
         self.uiFixFilePickerNew = appInfo.fixFilePickerNew
         self.uiFixLocalNotification = appInfo.fixLocalNotification
+        self.uiFixCommonSectionAlignment = appInfo.fixCommonSectionAlignment
         self.uiHideLiveContainer = appInfo.hideLiveContainer
         self.uiDontInjectTweakLoader = appInfo.dontInjectTweakLoader
         self.uiTweakLoaderInjectFailed = appInfo.info()["LCTweakLoaderCantInject"] as? Bool ?? false

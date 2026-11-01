@@ -109,6 +109,45 @@ void LCPatchAddRPath(const char *path, struct mach_header_64 *header) {
     insertRPathCommand("@loader_path", header);
 }
 
+void LCPatchCommonSectionAlignment(struct mach_header_64 *header, bool enabled, NSMutableDictionary<NSString *, NSNumber *> *originalAlignments) {
+    if (!enabled && originalAlignments.count == 0) {
+        return;
+    }
+
+    uint32_t sectionIndex = 0;
+    struct load_command *command = (void *)header + sizeof(struct mach_header_64);
+    for (uint32_t i = 0; i < header->ncmds; i++) {
+        if (command->cmd == LC_SEGMENT_64) {
+            struct segment_command_64 *segment = (void *)command;
+            struct section_64 *sections = (void *)command + sizeof(struct segment_command_64);
+            for (uint32_t j = 0; j < segment->nsects; j++, sectionIndex++) {
+                struct section_64 *section = &sections[j];
+                if (strncmp(segment->segname, "__DATA", sizeof(segment->segname)) != 0 ||
+                    strncmp(section->sectname, "__common", sizeof(section->sectname)) != 0 ||
+                    (section->flags & SECTION_TYPE) != S_ZEROFILL) {
+                    continue;
+                }
+
+                // Section ordinals survive LC_ID_DYLIB insertion; include the slice to keep FAT images independent.
+                NSString *key = [NSString stringWithFormat:@"%u:%u:%u", header->cputype, header->cpusubtype, sectionIndex];
+                if (enabled) {
+                    // Only relax the verified 32 KB zero-fill case, without moving data or changing code sections.
+                    if (section->align == 15 && (section->addr & 0x3fff) == 0) {
+                        originalAlignments[key] = @(section->align);
+                        section->align = 14;
+                    }
+                } else if (originalAlignments[key]) {
+                    if (section->align == 14) {
+                        section->align = originalAlignments[key].unsignedIntValue;
+                    }
+                    [originalAlignments removeObjectForKey:key];
+                }
+            }
+        }
+        command = (void *)command + command->cmdsize;
+    }
+}
+
 int LCPatchExecSlice(const char *path, struct mach_header_64 *header, bool doInject) {
     uint8_t *imageHeaderPtr = (uint8_t*)header + sizeof(struct mach_header_64);
     int ans = 0;
