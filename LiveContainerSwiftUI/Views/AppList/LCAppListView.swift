@@ -695,6 +695,11 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             errorShow = true
             return
         }
+
+        // Apply the preference before signing, but keep restoration records specific to the new binary.
+        if let appToReplace {
+            finalNewApp.fixCommonSectionAlignment = appToReplace.appInfo.fixCommonSectionAlignment
+        }
         
         // patch and sign it
         var signError : String? = nil

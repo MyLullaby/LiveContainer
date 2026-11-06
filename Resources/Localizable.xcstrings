@@ -6812,6 +6812,52 @@
         }
       }
     },
+    "lc.appSettings.fixCommonSectionAlignment" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16 KB Data Alignment Compatibility"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16 KB 数据对齐兼容"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "16 KB 資料對齊相容"
+          }
+        }
+      }
+    },
+    "lc.appSettings.fixCommonSectionAlignmentDesc" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable only for a '__DATA/__common' alignment error (1 << 15). On the next launch, LiveContainer changes its 32 KB alignment declaration to 16 KB before signing. This may not suit apps that require 32 KB alignment. Disabling restores only changes made by this option, not manually patched IPAs."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅在出现 '__DATA/__common' 对齐错误（1 << 15）时开启。下次启动时，LiveContainer 会在签名前将其 32 KB 对齐声明改为 16 KB。不适用于确实依赖 32 KB 对齐的应用。关闭后仅还原本开关做过的修改，不还原手动修改过的 IPA。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "僅在出現 '__DATA/__common' 對齊錯誤（1 << 15）時開啟。下次啟動時，LiveContainer 會在簽署前將其 32 KB 對齊宣告改為 16 KB。不適用於確實依賴 32 KB 對齊的應用程式。關閉後僅還原此開關做過的修改，不還原手動修改過的 IPA。"
+          }
+        }
+      }
+    },
     "lc.appSettings.fixFilePicker" : {
       "extractionState" : "manual",
       "localizations" : {

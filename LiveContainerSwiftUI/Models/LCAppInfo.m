@@ -323,10 +323,12 @@
     if (needPatch) {
         __block bool has64bitSlice = NO;
         __block bool isEncrypted = false;
+        NSMutableDictionary *originalAlignments = [info[@"LCOriginalCommonSectionAlignments"] mutableCopy] ?: [NSMutableDictionary new];
         NSString *error = LCParseMachO(execPath.UTF8String, false, ^(const char *path, struct mach_header_64 *header, int fd, void* filePtr) {
             if(header->cputype == CPU_TYPE_ARM64) {
                 has64bitSlice |= YES;
                 int patchResult = LCPatchExecSlice(path, header, ![self dontInjectTweakLoader]);
+                LCPatchCommonSectionAlignment(header, self.fixCommonSectionAlignment, originalAlignments);
                 if(patchResult & PATCH_EXEC_RESULT_NO_SPACE_FOR_TWEAKLOADER) {
                     info[@"LCTweakLoaderCantInject"] = @YES;
                     info[@"dontInjectTweakLoader"] = @YES;
@@ -345,6 +347,11 @@
             [NSUserDefaults.standardUserDefaults removeObjectForKey:@"SigningInProgress"];
             completetionHandler(NO, error);
             return;
+        }
+        if (originalAlignments.count > 0) {
+            info[@"LCOriginalCommonSectionAlignments"] = originalAlignments;
+        } else {
+            [info removeObjectForKey:@"LCOriginalCommonSectionAlignments"];
         }
         self.is32bit = is32bit;
         if (!is32bit) {
@@ -529,6 +536,19 @@
     
     _info[@"dontInjectTweakLoader"] = [NSNumber numberWithBool:dontInjectTweakLoader];
     // we have to update patch to achieve this
+    _info[@"LCPatchRevision"] = @(-1);
+    [self save];
+}
+
+- (bool)fixCommonSectionAlignment {
+    return [_info[@"fixCommonSectionAlignment"] boolValue];
+}
+
+- (void)setFixCommonSectionAlignment:(bool)enabled {
+    if (self.fixCommonSectionAlignment == enabled) {
+        return;
+    }
+    _info[@"fixCommonSectionAlignment"] = @(enabled);
     _info[@"LCPatchRevision"] = @(-1);
     [self save];
 }

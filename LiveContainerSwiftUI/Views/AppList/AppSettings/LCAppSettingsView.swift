@@ -314,6 +314,17 @@ struct LCAppSettingsView: View {
             } footer: {
                 Text("lc.appSettings.useLCBundleIdDesc".loc)
             }
+
+            if !model.uiIs32bit {
+                Section {
+                    Toggle(isOn: $model.uiFixCommonSectionAlignment) {
+                        Text("lc.appSettings.fixCommonSectionAlignment".loc)
+                    }
+                    .disabled(model.isAppRunning || model.isSigningInProgress)
+                } footer: {
+                    Text("lc.appSettings.fixCommonSectionAlignmentDesc".loc)
+                }
+            }
             
             if SharedModel.isPhone {
                 Section {
