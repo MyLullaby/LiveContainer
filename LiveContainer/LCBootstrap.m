@@ -364,7 +364,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
         symlink(target.UTF8String, tweakLoaderPath.UTF8String);
     }
 
-    [NSUserDefaults.lcSharedDefaults setObject:[NSString stringWithFormat:@"%@ %@ / %@\nhost=%@ (%@)\nconfigured loader=%@\ndisabled=%d",
+    [NSUserDefaults.lcSharedDefaults setObject:[NSString stringWithFormat:@"%@ %@ / %@\nhost=%@ (%@)\nconfigured loader=%@\ntweakLoaderDisabled=%d",
         NSDate.date, lcAppUrlScheme, appBundle.bundleIdentifier, lcMainBundle.bundlePath,
         lcMainBundle.infoDictionary[@"LCVersionInfo"], tweakLoaderPath.stringByResolvingSymlinksInPath,
         [guestAppInfo[@"dontLoadTweakLoader"] boolValue]] forKey:@"LCReturnToLibraryBootstrap"];
@@ -519,6 +519,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     
     // hook NSUserDefault before running libraries' initializers
     NUDGuestHooksInit();
+    LCReturnToLibraryHooksInit();
     if(!isSideStore) {
         SecItemGuestHooksInit();
         NSFMGuestHooksInit();

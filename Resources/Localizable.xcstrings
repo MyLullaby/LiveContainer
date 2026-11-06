@@ -24,13 +24,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No new gesture loader record. Open a guest in the updated LiveContainer, tap the status bar, then reopen this page."
+            "value" : "No core gesture initialization record. Open a guest in the updated LiveContainer, tap the status bar, then reopen this page."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "尚无新版手势加载记录。请在更新后的 LiveContainer 中打开一个应用，点击状态栏，再回到此页查看。"
+            "value" : "尚无基础手势初始化记录。请在更新后的 LiveContainer 中打开一个应用，点击状态栏，再回到此页查看。"
           }
         }
       }
@@ -41,13 +41,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "In a guest app, tap the status bar clock three times quickly to return to this LiveContainer’s app list. Normal mode restarts the guest process automatically; save your work first. Multitasking guests stay running. The status bar must be visible and TweakLoader enabled."
+            "value" : "In a guest app, tap the status bar clock three times quickly to return to this LiveContainer’s app list. Normal mode restarts the guest process automatically; save your work first. Multitasking guests stay running. The status bar must be visible. This gesture works without TweakLoader."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在应用内快速连点状态栏时钟三次，返回当前 LiveContainer 的应用列表。普通模式会自动重启 Guest 进程，请先保存内容；多任务模式保留应用运行。需要显示状态栏，并启用 TweakLoader。"
+            "value" : "在应用内快速连点状态栏时钟三次，返回当前 LiveContainer 的应用列表。普通模式会自动重启 Guest 进程，请先保存内容；多任务模式保留应用运行。需要显示状态栏，无需启用 TweakLoader。"
           }
         }
       }
