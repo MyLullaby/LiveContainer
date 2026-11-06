@@ -244,15 +244,17 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                                 .frame(width: UIFont.preferredFont(forTextStyle: .body).lineHeight, height: UIFont.preferredFont(forTextStyle: .body).lineHeight)
 
                         }
-                    } else {
-                        Button("Help", systemImage: "questionmark") {
-                            helpPresent = true
-                        }
                     }
                     
 
                 }
                 
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("lc.helpView.title", systemImage: "questionmark.circle") {
+                        helpPresent = true
+                    }
+                }
+
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("lc.appList.openLink".loc, systemImage: "link", action: {
                         Task { await onOpenWebViewTapped() }
