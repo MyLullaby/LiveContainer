@@ -428,7 +428,7 @@ final class ShareExtensionViewModel: ObservableObject {
 
             let item = ShareLaunchItem(app: app, container: container)
             let launchURLString = try preparePayloadForLaunch()
-            guard let launchURL = buildLaunchURL(for: item, launchURLString: launchURLString) else {
+            guard let launchURL = try buildLaunchURL(for: item, launchURLString: launchURLString) else {
                 throw ShareExtensionError("Unable to build launch URL.")
             }
 
@@ -536,27 +536,34 @@ final class ShareExtensionViewModel: ObservableObject {
         sharedDefaults?.set(bookmark, forKey: "LCLaunchExtensionFileBookmark")
     }
 
-    private func buildLaunchURL(for item: ShareLaunchItem, launchURLString: String?) -> URL? {
-        var schemeToLaunch = "livecontainer"
+    private func buildLaunchURL(for item: ShareLaunchItem, launchURLString: String?) throws -> URL? {
+        guard item.app.isShared else {
+            throw ShareExtensionError("lc.shareExtension.requiresSharedApp".loc)
+        }
+        let schemeToLaunch: String
         var newLaunch = false
 
         if var runningLC = LCSharedUtils.getContainerUsingLCScheme(withFolderName: item.container.folderName) {
             if runningLC.hasSuffix("liveprocess") {
                 runningLC = (runningLC as NSString).deletingPathExtension
             }
+            if runningLC == "livecontainer" {
+                throw ShareExtensionError("lc.shareExtension.closePrimaryGuest".loc)
+            }
             schemeToLaunch = runningLC
         } else {
             newLaunch = true
-            schemeToLaunch = item.app.isShared ? (firstFreeInstalledLC() ?? "livecontainer") : "livecontainer"
+            guard let idle = firstFreeInstalledSecondary() else {
+                throw ShareExtensionError("lc.shareExtension.noIdleSecondary".loc)
+            }
+            schemeToLaunch = idle
         }
 
         if newLaunch && !item.app.isHidden && !item.app.isLocked && !item.app.isJITNeeded {
             sharedDefaults?.set(schemeToLaunch, forKey: "LCLaunchExtensionScheme")
             sharedDefaults?.set(item.app.relativeBundlePath, forKey: "LCLaunchExtensionBundleID")
             sharedDefaults?.set(item.container.folderName, forKey: "LCLaunchExtensionContainerName")
-            if let launchURLString {
-                sharedDefaults?.set(launchURLString, forKey: "LCLaunchExtensionLaunchURL")
-            }
+            sharedDefaults?.set(launchURLString, forKey: "LCLaunchExtensionLaunchURL")
             sharedDefaults?.set(Date(), forKey: "LCLaunchExtensionLaunchDate")
         }
 
@@ -574,15 +581,21 @@ final class ShareExtensionViewModel: ObservableObject {
         return components.url
     }
 
-    private func firstFreeInstalledLC() -> String? {
-        for scheme in LCSharedUtils.lcUrlSchemes() {
+    private func firstFreeInstalledSecondary() -> String? {
+        for scheme in ["livecontainer2", "livecontainer3"] {
             guard
                 let url = URL(string: "\(scheme)://"),
                 LCShareExtensionLauncher.canOpenURL(fromShareExtension: url)
             else {
                 continue
             }
-            if LCSharedUtils.isLCScheme(inUse: scheme) {
+            if LCSharedUtils.isLCScheme(inUse: scheme) || LCSharedUtils.isLCScheme(inUse: scheme + ".liveprocess") {
+                continue
+            }
+            if sharedDefaults?.string(forKey: "LCLaunchExtensionScheme") == scheme,
+               sharedDefaults?.string(forKey: "LCLaunchExtensionBundleID") != nil,
+               let date = sharedDefaults?.object(forKey: "LCLaunchExtensionLaunchDate") as? Date,
+               abs(date.timeIntervalSinceNow) < 3 {
                 continue
             }
             return scheme

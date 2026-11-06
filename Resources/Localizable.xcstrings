@@ -1,6 +1,57 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "lc.shareExtension.requiresSharedApp" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This app is private. Convert it to a shared app in its LiveContainer settings before sharing to LiveContainer2 or LiveContainer3."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此应用为私有应用。请先在 LiveContainer 的应用设置中将它转为共享应用，再分享到 LiveContainer2 或 LiveContainer3。"
+          }
+        }
+      }
+    },
+    "lc.shareExtension.noIdleSecondary" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No idle LiveContainer2 or LiveContainer3 is available. Close a guest app in a secondary instance and share again. The primary stays available for installation."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有空闲的 LiveContainer2 或 LiveContainer3。请先关闭一个副容器中的应用，再重新分享；主容器保留用于安装。"
+          }
+        }
+      }
+    },
+    "lc.shareExtension.closePrimaryGuest" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This app is still running in the primary LiveContainer. Close it and share again to open it in an idle LiveContainer2 or LiveContainer3."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "该应用仍在主 LiveContainer 中运行。请先结束它，再重新分享，即可在空闲的 LiveContainer2 或 LiveContainer3 中打开。"
+          }
+        }
+      }
+    },
     "lc.appBanner.addToHomeScreen" : {
       "extractionState" : "manual",
       "localizations" : {
