@@ -560,6 +560,20 @@
         return YES;
     }
 }
+
+- (bool)replayThreadInitialization {
+    return [_info[@"replayThreadInitialization"] boolValue];
+}
+
+- (void)setReplayThreadInitialization:(bool)enabled {
+    _info[@"replayThreadInitialization"] = @(enabled);
+    [self save];
+}
+
+- (NSDictionary *)threadInitializationDiagnostics {
+    return [NSDictionary dictionaryWithContentsOfFile:[_bundlePath stringByAppendingPathComponent:@"LCThreadInitialization.plist"]];
+}
+
 - (void)setDontLoadTweakLoader:(bool)dontLoadTweakLoader {
     _info[@"dontLoadTweakLoader"] = [NSNumber numberWithBool:dontLoadTweakLoader];
     [self save];

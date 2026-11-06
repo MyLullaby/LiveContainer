@@ -36,6 +36,8 @@ typedef NS_ENUM(NSInteger, MultitaskSpecified){
 @property bool fixFilePickerNew;
 @property bool fixLocalNotification;
 @property bool fixCommonSectionAlignment;
+@property bool replayThreadInitialization;
+@property (nonatomic, readonly) NSDictionary *threadInitializationDiagnostics;
 @property bool doUseLCBundleId;
 @property NSString* selectedLanguage;
 @property NSString* dataUUID;

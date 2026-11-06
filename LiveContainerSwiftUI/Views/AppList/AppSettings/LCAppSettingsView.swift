@@ -37,6 +37,8 @@ struct LCAppSettingsView: View {
     @State private var errorShow = false
     @State private var errorInfo = ""
     @State private var selectUnusedContainerSheetShow = false
+    @State private var threadInitializationDiagnostics: [AnyHashable: Any] = [:]
+    @Environment(\.scenePhase) private var scenePhase
     
     @EnvironmentObject private var sharedModel : SharedModel
     
@@ -317,6 +319,37 @@ struct LCAppSettingsView: View {
 
             if !model.uiIs32bit {
                 Section {
+                    if let date = threadInitializationDiagnostics["date"] as? Date,
+                       let changed = threadInitializationDiagnostics["implementationChanged"] as? Bool {
+                        Text(changed ? "lc.appSettings.threadInitializationChanged".loc : "lc.appSettings.threadInitializationUnchanged".loc)
+                            .foregroundStyle(.secondary)
+                        Text(date.formatted(date: .numeric, time: .standard))
+                            .foregroundStyle(.secondary)
+                        if threadInitializationDiagnostics["replayCompleted"] as? Bool == true {
+                            Text("lc.appSettings.threadInitializationReplayed".loc)
+                                .foregroundStyle(.secondary)
+                        } else if threadInitializationDiagnostics["replayRequested"] as? Bool == true {
+                            Text("lc.appSettings.threadInitializationPending".loc)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("lc.appSettings.threadInitializationNotReplayed".loc)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Text("lc.appSettings.threadInitializationNotChecked".loc)
+                            .foregroundStyle(.secondary)
+                    }
+                    Toggle(isOn: $model.uiReplayThreadInitialization) {
+                        Text("lc.appSettings.replayThreadInitialization".loc)
+                    }
+                    .disabled(model.isAppRunning)
+                } header: {
+                    Text("lc.appSettings.threadInitialization".loc)
+                } footer: {
+                    Text("lc.appSettings.replayThreadInitializationDesc".loc)
+                }
+
+                Section {
                     Toggle(isOn: $model.uiFixCommonSectionAlignment) {
                         Text("lc.appSettings.fixCommonSectionAlignment".loc)
                     }
@@ -413,6 +446,14 @@ struct LCAppSettingsView: View {
         }
         .navigationTitle(appInfo.displayName())
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            threadInitializationDiagnostics = appInfo.threadInitializationDiagnostics ?? [:]
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
+                threadInitializationDiagnostics = appInfo.threadInitializationDiagnostics ?? [:]
+            }
+        }
         .alert("lc.common.error".loc, isPresented: $errorShow) {
             Button("lc.common.ok".loc, action: {
             })

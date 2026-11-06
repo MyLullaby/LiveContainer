@@ -67,6 +67,11 @@ class LCAppModel: ObservableObject, Hashable {
             appInfo.fixCommonSectionAlignment = uiFixCommonSectionAlignment
         }
     }
+    @Published var uiReplayThreadInitialization: Bool {
+        didSet {
+            appInfo.replayThreadInitialization = uiReplayThreadInitialization
+        }
+    }
     
     @Published var uiHideLiveContainer : Bool {
         didSet {
@@ -188,6 +193,7 @@ class LCAppModel: ObservableObject, Hashable {
         self.uiFixFilePickerNew = appInfo.fixFilePickerNew
         self.uiFixLocalNotification = appInfo.fixLocalNotification
         self.uiFixCommonSectionAlignment = appInfo.fixCommonSectionAlignment
+        self.uiReplayThreadInitialization = appInfo.replayThreadInitialization
         self.uiHideLiveContainer = appInfo.hideLiveContainer
         self.uiDontInjectTweakLoader = appInfo.dontInjectTweakLoader
         self.uiTweakLoaderInjectFailed = appInfo.info()["LCTweakLoaderCantInject"] as? Bool ?? false

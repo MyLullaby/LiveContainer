@@ -576,6 +576,9 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
         tweakLoaderLoaded = true;
     }
     
+    Class threadClass = NSThread.class;
+    IMP threadInitializer = class_getMethodImplementation(object_getClass(threadClass), @selector(initialize));
+
     // Preload executable to bypass RT_NOLOAD
     appMainImageIndex = _dyld_image_count();
     __block void *appHandle = 0;
@@ -629,6 +632,28 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     
     // Fix dynamic properties of some apps
     [NSUserDefaults performSelector:@selector(initialize)];
+
+    BOOL threadInitializerChanged = class_getMethodImplementation(object_getClass(threadClass), @selector(initialize)) != threadInitializer;
+    BOOL replayThreadInitialization = [guestAppInfo[@"replayThreadInitialization"] boolValue] && threadInitializerChanged;
+    NSString *threadDiagnosticPath = [bundlePath stringByAppendingPathComponent:@"LCThreadInitialization.plist"];
+    NSMutableDictionary *threadDiagnostic = [@{
+        @"date": NSDate.date,
+        @"implementationChanged": @(threadInitializerChanged),
+        @"replayRequested": @(replayThreadInitialization),
+        @"replayCompleted": @NO
+    } mutableCopy];
+    if (![threadDiagnostic writeBinToFile:threadDiagnosticPath atomically:YES]) {
+        NSLog(@"[LCBootstrap] Could not save thread initialization diagnostics");
+    }
+
+    // A changed implementation is only a diagnostic; replay requires the app's opt-in.
+    if (replayThreadInitialization) {
+        [threadClass performSelector:@selector(initialize)];
+        threadDiagnostic[@"replayCompleted"] = @YES;
+        if (![threadDiagnostic writeBinToFile:threadDiagnosticPath atomically:YES]) {
+            NSLog(@"[LCBootstrap] Could not save thread initialization replay result");
+        }
+    }
 
     // Attempt to load the bundle. 32-bit bundle will always fail because of 32-bit main executable, so ignore it
     if (!is32bit && ![appBundle loadAndReturnError:&error]) {

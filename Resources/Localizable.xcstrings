@@ -1,6 +1,213 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "lc.appSettings.threadInitialization" : {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Thread initialization check"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "线程初始化检测"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "執行緒初始化檢測"
+          }
+        }
+      }
+    },
+    "lc.appSettings.threadInitializationChanged" : {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last launch: NSThread initialization implementation changed during loading. This does not confirm a fault or whether it already ran."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次启动：加载过程中 NSThread 初始化实现发生变化。这不代表已确认异常，也不能判断它是否已执行。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次啟動：載入過程中 NSThread 初始化實作發生變化。這不代表已確認異常，也無法判斷它是否已執行。"
+          }
+        }
+      }
+    },
+    "lc.appSettings.threadInitializationUnchanged" : {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last launch: no change detected in the NSThread initialization implementation."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次启动：未检测到 NSThread 初始化实现变化。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次啟動：未偵測到 NSThread 初始化實作變化。"
+          }
+        }
+      }
+    },
+    "lc.appSettings.threadInitializationNotChecked" : {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No launch check recorded. Launch this app with this version of LiveContainer, then return here."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暂无启动检测记录。请使用此版本 LiveContainer 启动一次该应用，再回到此页查看。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "暫無啟動檢測記錄。請使用此版本 LiveContainer 啟動一次此應用程式，再回到此頁查看。"
+          }
+        }
+      }
+    },
+    "lc.appSettings.threadInitializationReplayed" : {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last launch: explicit initialization call completed. This does not confirm the app works correctly."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次启动：已完成补调用。不代表应用功能已验证正常。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次啟動：已完成補呼叫。不代表應用程式功能已驗證正常。"
+          }
+        }
+      }
+    },
+    "lc.appSettings.threadInitializationPending" : {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last launch: explicit initialization call was requested, but completion was not recorded."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次启动：已请求补调用，但未记录到完成。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次啟動：已要求補呼叫，但未記錄到完成。"
+          }
+        }
+      }
+    },
+    "lc.appSettings.threadInitializationNotReplayed" : {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last launch: no explicit initialization call was requested."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次启动：未请求补调用。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次啟動：未要求補呼叫。"
+          }
+        }
+      }
+    },
+    "lc.appSettings.replayThreadInitialization" : {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Explicitly run thread initialization"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "补执行线程初始化"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "補執行執行緒初始化"
+          }
+        }
+      }
+    },
+    "lc.appSettings.replayThreadInitializationDesc" : {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off by default. Detection only records changes. If this app has problems and a change was detected, you can enable this compatibility option. It calls the changed initializer on the next full launch. If the app already called it, running it again may cause problems; turn this off if new issues appear. Fully exit and relaunch the app after changing this option."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "默认关闭，检测只记录变化。若此应用使用异常且检测到变化，可手动开启兼容处理，下次完整启动时补调用变化后的初始化。若应用已自行调用，重复执行可能引发问题；出现新异常时请关闭。修改后需彻底退出并重新启动应用。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "預設關閉，檢測僅記錄變化。若此應用程式使用異常且偵測到變化，可手動開啟相容處理，下次完整啟動時補呼叫變更後的初始化。若應用程式已自行呼叫，重複執行可能引發問題；出現新異常時請關閉。變更後需完全結束並重新啟動應用程式。"
+          }
+        }
+      }
+    },
     "lc.helpView.returnGestureDiagnostics" : {
       "extractionState" : "manual",
       "localizations" : {
