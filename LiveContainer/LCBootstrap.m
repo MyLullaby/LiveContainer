@@ -364,6 +364,14 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
         symlink(target.UTF8String, tweakLoaderPath.UTF8String);
     }
 
+    [NSUserDefaults.lcSharedDefaults setObject:[NSString stringWithFormat:@"%@ %@ / %@\nhost=%@ (%@)\nconfigured loader=%@\ndisabled=%d",
+        NSDate.date, lcAppUrlScheme, appBundle.bundleIdentifier, lcMainBundle.bundlePath,
+        lcMainBundle.infoDictionary[@"LCVersionInfo"], tweakLoaderPath.stringByResolvingSymlinksInPath,
+        [guestAppInfo[@"dontLoadTweakLoader"] boolValue]] forKey:@"LCReturnToLibraryBootstrap"];
+    for (NSString *key in @[@"LCReturnToLibraryLoadedHooks", @"LCReturnToLibraryLastTap", @"LCReturnToLibraryLastReturn"]) {
+        [NSUserDefaults.lcSharedDefaults removeObjectForKey:key];
+    }
+
     // If JIT is enabled, bypass library validation so we can load arbitrary binaries
     bool isJitEnabled = checkJITEnabled();
     if (isJitEnabled) {

@@ -4,6 +4,7 @@
 #import "../LiveContainer/utils.h"
 #import <LocalAuthentication/LocalAuthentication.h>
 #import "Localization.h"
+#import <dlfcn.h>
 
 UIInterfaceOrientation LCOrientationLock = UIInterfaceOrientationUnknown;
 NSMutableArray<NSString*>* LCSupportedUrlSchemes = nil;
@@ -14,37 +15,64 @@ BOOL launchURLProcessed = NO;
 - (void)lc_handleStatusBarTapAction:(id)action;
 @end
 
-@implementation UIStatusBarManager (LCReturnToLibrary)
-- (void)lc_handleStatusBarTapAction:(id)action {
+@interface UIApplication (LCReturnToLibrary)
+- (void)lc_scrollsToTopInitiatorView:(UIView *)view touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event;
+@end
+
+// Local status-bar touches can enter UIApplication without a manager tap action.
+static NSUInteger LCStatusBarTapDeliveryDepth;
+
+static BOOL LCConsumeStatusBarTripleTap(id owner, NSString *source) {
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
-    NSMutableArray<NSNumber *> *taps = objc_getAssociatedObject(self, @selector(lc_handleStatusBarTapAction:));
+    NSMutableArray<NSNumber *> *taps = objc_getAssociatedObject(owner, @selector(lc_handleStatusBarTapAction:));
     if (!taps) {
         taps = [NSMutableArray new];
-        objc_setAssociatedObject(self, @selector(lc_handleStatusBarTapAction:), taps, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(owner, @selector(lc_handleStatusBarTapAction:), taps, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     if (taps.count && now - taps.lastObject.doubleValue > 0.45) {
         [taps removeAllObjects];
     }
     [taps addObject:@(now)];
+    [NSUserDefaults.lcSharedDefaults setObject:[NSString stringWithFormat:@"%@ %@: tap %lu (%@)",
+        NSDate.date, NSUserDefaults.lcAppUrlScheme, (unsigned long)taps.count, source]
+        forKey:@"LCReturnToLibraryLastTap"];
     if (taps.count == 3) {
         [taps removeAllObjects];
-        NSLog(@"[LC][RTL] status bar triple tap");
+        NSLog(@"[LC][RTL] status bar triple tap via %@", source);
         [NSClassFromString(@"LCSharedUtils") returnToLibrary];
-        return;
+        return YES;
     }
-    // Keep normal status-bar scroll-to-top behavior until the third tap.
+    return NO;
+}
+
+@implementation UIStatusBarManager (LCReturnToLibrary)
+- (void)lc_handleStatusBarTapAction:(id)action {
+    if (!LCStatusBarTapDeliveryDepth && LCConsumeStatusBarTripleTap(self, @"manager")) return;
+    LCStatusBarTapDeliveryDepth++;
     [self lc_handleStatusBarTapAction:action];
+    LCStatusBarTapDeliveryDepth--;
 }
 @end
 
 __attribute__((constructor))
 static void UIKitGuestHooksInit() {
     if(!NSUserDefaults.lcGuestAppId) return;
-    if ([UIStatusBarManager instancesRespondToSelector:@selector(handleTapAction:)]) {
+    BOOL managerTapAvailable = [UIStatusBarManager instancesRespondToSelector:@selector(handleTapAction:)];
+    BOOL localTapAvailable = [UIApplication instancesRespondToSelector:@selector(_scrollsToTopInitiatorView:touchesEnded:withEvent:)];
+    if (localTapAvailable) {
+        swizzle(UIApplication.class, @selector(_scrollsToTopInitiatorView:touchesEnded:withEvent:), @selector(lc_scrollsToTopInitiatorView:touchesEnded:withEvent:));
+    }
+    if (managerTapAvailable) {
         swizzle(UIStatusBarManager.class, @selector(handleTapAction:), @selector(lc_handleStatusBarTapAction:));
     } else {
         NSLog(@"[LC][RTL] status bar tap handler unavailable");
     }
+    Dl_info loaderInfo = {0};
+    dladdr((const void *)UIKitGuestHooksInit, &loaderInfo);
+    [NSUserDefaults.lcSharedDefaults setObject:[NSString stringWithFormat:@"clock-return-r2 %@\n%@ / %@ / iOS %@\nlocal=%d manager=%d\nloader=%s",
+        NSDate.date, NSUserDefaults.lcAppUrlScheme, NSUserDefaults.lcGuestAppId,
+        UIDevice.currentDevice.systemVersion, localTapAvailable, managerTapAvailable,
+        loaderInfo.dli_fname ?: "unknown"] forKey:@"LCReturnToLibraryLoadedHooks"];
     swizzle(UIApplication.class, @selector(_applicationOpenURLAction:payload:origin:), @selector(hook__applicationOpenURLAction:payload:origin:));
     swizzle(UIApplication.class, @selector(_connectUISceneFromFBSScene:transitionContext:), @selector(hook__connectUISceneFromFBSScene:transitionContext:));
     swizzle(UIApplication.class, @selector(openURL:options:completionHandler:), @selector(hook_openURL:options:completionHandler:));
@@ -563,6 +591,15 @@ static NSURL *LCURLFromPayload(id value) {
 }
 
 @implementation UIApplication(LiveContainerHook)
+- (void)lc_scrollsToTopInitiatorView:(UIView *)view touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    id owner = view.window.windowScene.statusBarManager ?: (id)self;
+    if (!LCStatusBarTapDeliveryDepth && LCConsumeStatusBarTripleTap(owner, @"local touches")) return;
+    // Nested manager callbacks belong to this same tap, not another user tap.
+    LCStatusBarTapDeliveryDepth++;
+    [self lc_scrollsToTopInitiatorView:view touchesEnded:touches withEvent:event];
+    LCStatusBarTapDeliveryDepth--;
+}
+
 - (void)hook__applicationOpenURLAction:(id)action payload:(NSDictionary *)payload origin:(id)origin {
     NSURL *url = LCURLFromPayload(payload[UIApplicationLaunchOptionsURLKey]);
     if (!url && [action isKindOfClass:UIOpenURLAction.class]) {

@@ -9,6 +9,12 @@ import SwiftUI
 
 struct LCHelpView : View {
     @Binding var isPresent : Bool
+
+    private var returnGestureDiagnostics: String {
+        let lines = ["LCReturnToLibraryBootstrap", "LCReturnToLibraryLoadedHooks", "LCReturnToLibraryLastTap", "LCReturnToLibraryLastReturn"]
+            .compactMap { LCUtils.appGroupUserDefault.string(forKey: $0) }
+        return lines.isEmpty ? "lc.helpView.noReturnGestureDiagnostics".loc : lines.joined(separator: "\n\n")
+    }
     
     var body: some View {
         NavigationView {
@@ -19,6 +25,15 @@ struct LCHelpView : View {
                     Text("lc.helpView.text2")
                     Text("")
                     Text("lc.helpView.returnToLibraryGesture")
+                    Divider()
+                    Text("lc.helpView.returnGestureDiagnostics")
+                        .font(.headline)
+                    Text(verbatim: returnGestureDiagnostics)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                    Button("lc.common.copy") {
+                        UIPasteboard.general.string = returnGestureDiagnostics
+                    }
                 }
                 .padding()
             }
