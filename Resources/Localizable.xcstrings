@@ -1,6 +1,23 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "lc.helpView.returnToLibraryGesture" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In a guest app, tap the status bar clock three times quickly to return to this LiveContainer’s app list. Normal mode restarts the guest process automatically; save your work first. Multitasking guests stay running. The status bar must be visible and TweakLoader enabled."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在应用内快速连点状态栏时钟三次，返回当前 LiveContainer 的应用列表。普通模式会自动重启 Guest 进程，请先保存内容；多任务模式保留应用运行。需要显示状态栏，并启用 TweakLoader。"
+          }
+        }
+      }
+    },
     "lc.shareExtension.requiresSharedApp" : {
       "extractionState" : "manual",
       "localizations" : {

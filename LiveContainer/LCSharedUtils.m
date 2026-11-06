@@ -185,10 +185,14 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
         NSLog(@"[LC][RTL] not handled: scheme mismatch (url.scheme=%@ mine=%@)", url.scheme, NSUserDefaults.lcAppUrlScheme);
         return LCReturnToLibraryResultNotHandled;
     }
+    return [self returnToLibrary];
+}
 
-    NSLog(@"[LC] Return-to-library received: scheme=%@ guest=%@ liveProcess=%d", NSUserDefaults.lcAppUrlScheme, NSUserDefaults.lcGuestAppId, NSUserDefaults.isLiveProcess);
++ (LCReturnToLibraryResult)returnToLibrary {
+    NSLog(@"[LC] Return-to-library requested: scheme=%@ guest=%@ liveProcess=%d", NSUserDefaults.lcAppUrlScheme, NSUserDefaults.lcGuestAppId, NSUserDefaults.isLiveProcess);
     if (NSUserDefaults.isLiveProcess) {
         // The library belongs to the host, not this extension's process or defaults.
+        NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@://return-to-library", NSUserDefaults.lcAppUrlScheme]];
         dispatch_async(dispatch_get_main_queue(), ^{
             UIApplication *application = [NSClassFromString(@"UIApplication") sharedApplication];
             NSLog(@"[LC][RTL] liveProcess: forwarding to host");

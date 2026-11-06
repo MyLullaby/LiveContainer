@@ -9,9 +9,42 @@ UIInterfaceOrientation LCOrientationLock = UIInterfaceOrientationUnknown;
 NSMutableArray<NSString*>* LCSupportedUrlSchemes = nil;
 BOOL launchURLProcessed = NO;
 
+@interface UIStatusBarManager (LCReturnToLibrary)
+- (void)handleTapAction:(id)action;
+- (void)lc_handleStatusBarTapAction:(id)action;
+@end
+
+@implementation UIStatusBarManager (LCReturnToLibrary)
+- (void)lc_handleStatusBarTapAction:(id)action {
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    NSMutableArray<NSNumber *> *taps = objc_getAssociatedObject(self, @selector(lc_handleStatusBarTapAction:));
+    if (!taps) {
+        taps = [NSMutableArray new];
+        objc_setAssociatedObject(self, @selector(lc_handleStatusBarTapAction:), taps, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (taps.count && now - taps.lastObject.doubleValue > 0.45) {
+        [taps removeAllObjects];
+    }
+    [taps addObject:@(now)];
+    if (taps.count == 3) {
+        [taps removeAllObjects];
+        NSLog(@"[LC][RTL] status bar triple tap");
+        [NSClassFromString(@"LCSharedUtils") returnToLibrary];
+        return;
+    }
+    // Keep normal status-bar scroll-to-top behavior until the third tap.
+    [self lc_handleStatusBarTapAction:action];
+}
+@end
+
 __attribute__((constructor))
 static void UIKitGuestHooksInit() {
     if(!NSUserDefaults.lcGuestAppId) return;
+    if ([UIStatusBarManager instancesRespondToSelector:@selector(handleTapAction:)]) {
+        swizzle(UIStatusBarManager.class, @selector(handleTapAction:), @selector(lc_handleStatusBarTapAction:));
+    } else {
+        NSLog(@"[LC][RTL] status bar tap handler unavailable");
+    }
     swizzle(UIApplication.class, @selector(_applicationOpenURLAction:payload:origin:), @selector(hook__applicationOpenURLAction:payload:origin:));
     swizzle(UIApplication.class, @selector(_connectUISceneFromFBSScene:transitionContext:), @selector(hook__connectUISceneFromFBSScene:transitionContext:));
     swizzle(UIApplication.class, @selector(openURL:options:completionHandler:), @selector(hook_openURL:options:completionHandler:));

@@ -20,6 +20,7 @@ typedef NS_ENUM(NSInteger, LCReturnToLibraryResult) {
 + (BOOL)launchToGuestAppWithClassicMode:(NSUInteger)classicMode;
 + (BOOL)launchToGuestAppWithURL:(NSURL *)url;
 + (BOOL)isReturnToLibraryURL:(NSURL *)url;
++ (LCReturnToLibraryResult)returnToLibrary;
 + (LCReturnToLibraryResult)handleReturnToLibraryURL:(NSURL *)url NS_SWIFT_NAME(handleReturnToLibraryURL(_:));
 + (void)setWebPageUrlForNextLaunch:(NSString*)urlString;
 + (BOOL)isLCSchemeInUse:(NSString*)lc;

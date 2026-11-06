@@ -17,6 +17,8 @@ struct LCHelpView : View {
                     Text("lc.helpView.text1")
                     Text("")
                     Text("lc.helpView.text2")
+                    Text("")
+                    Text("lc.helpView.returnToLibraryGesture")
                 }
                 .padding()
             }
