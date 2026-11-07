@@ -415,30 +415,7 @@ class LCAppModel: ObservableObject, Hashable {
     }
     
     func signApp(force: Bool = false) async throws {
-        if !(appInfo is BuiltInSideStoreAppInfo), let staged = try LCPluginPreparation.stage(app: appInfo) {
-            defer { try? FileManager.default.removeItem(at: staged) }
-            for container in appInfo.containers {
-                if LCSharedUtils.getContainerUsingLCScheme(withFolderName: container.folderName) != nil {
-                    throw LCPluginError("应用正在其他容器中运行，请退出后再更新插件。")
-                }
-            }
-            guard let stagedInfo = LCAppInfo(bundlePath: staged.path) else {
-                throw LCPluginError("无法读取插件处理后的应用。")
-            }
-            stagedInfo.info()["LCPatchRevision"] = -1
-            stagedInfo.save()
-            try await signApp(stagedInfo, force: true)
-            let bundle = URL(fileURLWithPath: appInfo.bundlePath())
-            try LCPluginPreparation.commit(staged: staged, to: bundle)
-            guard let updatedInfo = LCAppInfo(bundlePath: bundle.path) else {
-                throw LCPluginError("无法读取插件处理后的应用。")
-            }
-            updatedInfo.relativeBundlePath = appInfo.relativeBundlePath
-            updatedInfo.isShared = appInfo.isShared
-            appInfo = updatedInfo
-        } else {
-            try await signApp(appInfo, force: force)
-        }
+        try await signApp(appInfo, force: force)
 
         guard !appInfo.dontInjectTweakLoader || !appInfo.dontLoadTweakLoader else { return }
         guard let tweakFolder = appInfo.tweakFolder else { return }
@@ -451,8 +428,10 @@ class LCAppModel: ObservableObject, Hashable {
         }
     }
 
-    @MainActor func updatePlugins(importing urls: [URL] = [], removing name: String? = nil) async throws {
-        guard !isAppRunning, !isSigningInProgress else { throw LCPluginError("应用正在处理中，请稍后重试。") }
+    @MainActor func updatePlugins(importing urls: [URL] = [], removing paths: [String] = []) async throws {
+        guard !(appInfo is BuiltInSideStoreAppInfo), !isAppRunning, !isSigningInProgress else {
+            throw LCPluginError("应用正在处理中或不支持修改插件。")
+        }
         for container in appInfo.containers {
             if LCSharedUtils.getContainerUsingLCScheme(withFolderName: container.folderName) != nil {
                 throw LCPluginError("请先退出正在运行的应用，再修改插件。")
@@ -460,9 +439,19 @@ class LCAppModel: ObservableObject, Hashable {
         }
         isAppRunning = true
         defer { isAppRunning = false }
-        if !urls.isEmpty { try LCAppPlugins.importFiles(urls, app: appInfo) }
-        if let name { try LCAppPlugins.remove(name, app: appInfo) }
-        try await signApp()
+        let staged = try LCPluginPreparation.stage(app: appInfo, importing: urls, removing: paths)
+        defer { try? FileManager.default.removeItem(at: staged) }
+        guard let stagedInfo = LCAppInfo(bundlePath: staged.path) else { throw LCPluginError("无法读取修改后的应用。") }
+        stagedInfo.info()["LCPatchRevision"] = -1
+        stagedInfo.info().removeObject(forKey: "LCPluginsDisabled")
+        stagedInfo.save()
+        try await signApp(stagedInfo, force: true)
+        let bundle = URL(fileURLWithPath: appInfo.bundlePath())
+        try LCPluginPreparation.commit(staged: staged, to: bundle)
+        guard let updatedInfo = LCAppInfo(bundlePath: bundle.path) else { throw LCPluginError("无法读取修改后的应用。") }
+        updatedInfo.relativeBundlePath = appInfo.relativeBundlePath
+        updatedInfo.isShared = appInfo.isShared
+        appInfo = updatedInfo
     }
 
     private func signApp(_ info: LCAppInfo, force: Bool) async throws {

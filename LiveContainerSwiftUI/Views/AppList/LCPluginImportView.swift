@@ -51,21 +51,32 @@ struct LCPluginImportView: View {
     @State private var busy = false
     @State private var message: String?
     @State private var target: LCAppModel?
+    @AppStorage("LCPluginLastTarget", store: LCUtils.appGroupUserDefault) private var lastTarget = ""
+    @AppStorage("LCIconStyle", store: LCUtils.appGroupUserDefault) private var iconStyle = 0
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var apps: [LCAppModel] {
+        let visible = (sharedModel.apps + (sharedModel.isHiddenAppUnlocked ? sharedModel.hiddenApps : []))
+            .filter { !($0.appInfo is BuiltInSideStoreAppInfo) }
+        return visible.filter { $0.appInfo.relativeBundlePath == lastTarget }
+            + visible.filter { $0.appInfo.relativeBundlePath != lastTarget }
+    }
 
     var body: some View {
         NavigationView {
             List {
                 Section {
-                    ForEach(sharedModel.apps + (sharedModel.isHiddenAppUnlocked ? sharedModel.hiddenApps : []), id: \.self) { app in
-                        if !(app.appInfo is BuiltInSideStoreAppInfo) {
-                            Button(app.appInfo.displayName() ?? app.appInfo.relativeBundlePath ?? "App") { importInto(app) }
-                        }
-                    }
-                    if !sharedModel.isHiddenAppUnlocked && !sharedModel.hiddenApps.isEmpty {
-                        Button("解锁隐藏应用") {
-                            Task {
-                                do { sharedModel.isHiddenAppUnlocked = try await LCUtils.authenticateUser() }
-                                catch { message = error.localizedDescription }
+                    ForEach(apps, id: \.self) { app in
+                        Button { importInto(app) } label: {
+                            HStack(spacing: 12) {
+                                Image(uiImage: app.appInfo.iconIsDarkIcon(iconStyle == 1 || (iconStyle == 2 && colorScheme == .dark)) ?? UIImage())
+                                    .resizable().scaledToFit().frame(width: 44, height: 44)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                Text(app.appInfo.displayName() ?? "App").foregroundColor(.primary)
+                                Spacer()
+                                if app.appInfo.relativeBundlePath == lastTarget {
+                                    Text("上次选择").font(.caption).foregroundColor(.secondary)
+                                }
                             }
                         }
                     }
@@ -93,6 +104,7 @@ struct LCPluginImportView: View {
                 if app.appInfo.isLocked && !sharedModel.isHiddenAppUnlocked {
                     guard try await LCUtils.authenticateUser() else { return }
                 }
+                lastTarget = app.appInfo.relativeBundlePath ?? ""
                 target = app
                 try await app.updatePlugins(importing: request.files)
                 message = "已导入到 \(app.appInfo.displayName() ?? "App")。"

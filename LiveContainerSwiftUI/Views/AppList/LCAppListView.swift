@@ -735,7 +735,6 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         
         if let appToReplace {
             // copy previous configration to new app
-            try LCAppPlugins.preserveSources(from: appToReplace.appInfo, to: finalNewApp)
             finalNewApp.autoSaveDisabled = true
             finalNewApp.isLocked = appToReplace.appInfo.isLocked
             finalNewApp.isHidden = appToReplace.appInfo.isHidden
@@ -769,6 +768,21 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         finalNewApp.relativeBundlePath = appRelativePath
         if appToReplace?.uiDontSign ?? false || LCUtils.appGroupUserDefault.bool(forKey: "LCDontSignApp") {
             finalNewApp.dontSign = true
+        }
+        if let appToReplace, !(appToReplace.appInfo is BuiltInSideStoreAppInfo),
+           let plugins = try LCPluginPreparation.manifest(in: URL(fileURLWithPath: appToReplace.appInfo.bundlePath())),
+           !plugins.injectedFiles.isEmpty {
+            let prepared = try LCPluginPreparation.stage(app: finalNewApp, inheriting: appToReplace.appInfo)
+            defer { try? fm.removeItem(at: prepared) }
+            try LCPluginPreparation.commit(staged: prepared, to: stagedApp)
+            guard let preparedInfo = LCAppInfo(bundlePath: stagedApp.path) else {
+                throw LCPluginError("无法读取恢复插件后的应用，已停止覆盖安装。")
+            }
+            preparedInfo.relativeBundlePath = appRelativePath
+            preparedInfo.isShared = finalNewApp.isShared
+            preparedInfo.info()["LCPatchRevision"] = -1
+            preparedInfo.save()
+            finalNewApp = preparedInfo
         }
         let installingModel = LCAppModel(appInfo: finalNewApp)
         let progressSubscription = installingModel.$signProgress.sink { value in

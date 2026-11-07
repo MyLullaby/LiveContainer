@@ -583,6 +583,19 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     // Preload executable to bypass RT_NOLOAD
     LCSetGuestExecutablePath(appExecPath);
     appMainImageIndex = LCActualDyldImageCount();
+    // Persist each boundary so a constructor hang still leaves a useful last stage.
+    NSString *launchDiagnosticPath = [bundlePath stringByAppendingPathComponent:@"LCPluginLaunch.plist"];
+    NSMutableDictionary *launchDiagnostic = [@{
+        @"date": NSDate.date,
+        @"stage": @"loadingImages"
+    } mutableCopy];
+    void (^recordLaunchStage)(NSString *) = ^(NSString *stage) {
+        launchDiagnostic[@"stage"] = stage;
+        if (![launchDiagnostic writeBinToFile:launchDiagnosticPath atomically:YES]) {
+            NSLog(@"[LCBootstrap] Could not save plugin launch diagnostics");
+        }
+    };
+    recordLaunchStage(@"loadingImages");
     __block void *appHandle = 0;
     void (^dlopenBlock)(void) = ^{
         appHandle = dlopen_nolock(appExecPath, RTLD_LAZY|RTLD_GLOBAL|RTLD_FIRST);
@@ -605,10 +618,13 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
         } else {
             appError = @"dlopen: an unknown error occurred";
         }
+        launchDiagnostic[@"error"] = appError;
+        recordLaunchStage(@"loadFailed");
         NSLog(@"[LCBootstrap] %@", appError);
         *path = oldPath;
         return appError;
     }
+    recordLaunchStage(@"imagesLoaded");
     
     if([guestAppInfo[@"dontInjectTweakLoader"] ?: @YES boolValue] && ![guestAppInfo[@"dontLoadTweakLoader"] ?: @YES boolValue]) {
         tweakLoaderLoaded = true;
@@ -660,6 +676,8 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     // Attempt to load the bundle. 32-bit bundle will always fail because of 32-bit main executable, so ignore it
     if (!is32bit && ![appBundle loadAndReturnError:&error]) {
         appError = error.localizedDescription;
+        launchDiagnostic[@"error"] = appError;
+        recordLaunchStage(@"bundleFailed");
         NSLog(@"[LCBootstrap] loading bundle failed: %@", error);
         *path = oldPath;
         return appError;
@@ -670,6 +688,8 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     appMain = getAppEntryPoint(appHandle);
     if (!appMain) {
         appError = @"Could not find the main entry point";
+        launchDiagnostic[@"error"] = appError;
+        recordLaunchStage(@"entryPointMissing");
         NSLog(@"[LCBootstrap] %@", appError);
         *path = oldPath;
         return appError;
@@ -677,6 +697,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
 
     // Go!
     NSLog(@"[LCBootstrap] jumping to main %p", appMain);
+    recordLaunchStage(@"enteringMain");
     int ret;
     if(!is32bit) {
         argv[0] = (char *)appExecPath;
@@ -685,6 +706,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
         char *argv32[] = {(char*)appExecPath, (char*)*path, NULL};
         ret = appMain(sizeof(argv32)/sizeof(*argv32) - 1, argv32, environ);
     }
+    recordLaunchStage(@"mainReturned");
     return [NSString stringWithFormat:@"App returned from its main function with code %d.", ret];
 }
 

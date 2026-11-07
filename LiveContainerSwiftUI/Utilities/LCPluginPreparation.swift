@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Dependency rewriting reuses IPAWorkshop's Mach-O editing workflow.
 import Foundation
-import CryptoKit
 
 struct LCPluginPreparation {
-    private struct Manifest: Codable {
+    struct Manifest: Codable {
         let revision: Int
-        let fingerprint: String
         let executable: String
         let injectedFiles: [String]
         let images: [String]
@@ -15,92 +13,114 @@ struct LCPluginPreparation {
     private static let stateDirectory = ".LCPluginPreparation"
     private static let manifestName = "LCPluginManifest.plist"
 
-    // Return a staged app only when the installed plugin configuration changed.
-    static func stage(app: LCAppInfo) throws -> URL? {
+    static func manifest(in bundle: URL) throws -> Manifest? {
+        let url = bundle.appendingPathComponent(manifestName)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return try PropertyListDecoder().decode(Manifest.self, from: Data(contentsOf: url))
+    }
+
+    // Modify a disposable copy; only publish it after signing succeeds.
+    static func stage(app: LCAppInfo, importing urls: [URL] = [], removing paths: [String] = [], inheriting oldApp: LCAppInfo? = nil) throws -> URL {
         let fm = FileManager.default
         let bundle = URL(fileURLWithPath: app.bundlePath()).resolvingSymlinksInPath()
-        let manifestURL = bundle.appendingPathComponent(manifestName)
-        let previous = try fm.fileExists(atPath: manifestURL.path)
-            ? PropertyListDecoder().decode(Manifest.self, from: Data(contentsOf: manifestURL)) : nil
-        let root = LCAppPlugins.directory(app: app)
-        let items = try pluginItems(in: root, recursive: true)
-        guard !items.isEmpty || previous != nil else { return nil }
-        if !items.isEmpty && (!app.dontInjectTweakLoader || !app.dontLoadTweakLoader) {
-            throw LCPluginError("请先在应用设置中打开“不注入 TweakLoader”和“不加载 TweakLoader”，再使用独立插件列表。")
+        var inherited: [URL] = []
+        if let oldApp {
+            let oldBundle = URL(fileURLWithPath: oldApp.bundlePath()).resolvingSymlinksInPath()
+            for path in try manifest(in: oldBundle)?.injectedFiles ?? [] {
+                let file = try contained(path, in: oldBundle)
+                let expected = (file.pathExtension.lowercased() == "bundle" ? "" : "Frameworks/") + file.lastPathComponent
+                guard ["dylib", "framework", "bundle"].contains(file.pathExtension.lowercased()), path == expected else {
+                    throw LCPluginError("旧应用的插件或资源缺失、路径无效：\(path)，已停止覆盖安装。")
+                }
+                // The incoming IPA owns conflicts; inherit only files it does not contain.
+                if fm.fileExists(atPath: try contained(path, in: bundle).path) { continue }
+                guard fm.fileExists(atPath: file.path) else {
+                    throw LCPluginError("旧应用的插件或资源缺失：\(path)，已停止覆盖安装。")
+                }
+                inherited.append(file)
+            }
         }
         guard !app.is32bit else { throw LCPluginError("直接注入插件暂不支持 32 位 Guest。") }
+        if (!urls.isEmpty || !inherited.isEmpty) && (!app.dontInjectTweakLoader || !app.dontLoadTweakLoader) {
+            throw LCPluginError("请先在应用设置中打开“不注入 TweakLoader”和“不加载 TweakLoader”。")
+        }
+        let info = try PropertyListSerialization.propertyList(from: Data(contentsOf: bundle.appendingPathComponent("Info.plist")), format: nil) as? [String: Any]
+        guard let executable = info?["CFBundleExecutable"] as? String, !executable.isEmpty,
+              executable == (executable as NSString).lastPathComponent else { throw LCPluginError("主程序文件名无效。") }
+        let previous = try manifest(in: bundle)
+        let inspection = try LCAppPlugins.inspect(app: app)
+        let workspace = fm.temporaryDirectory.appendingPathComponent("LCPluginImport-\(UUID().uuidString)")
+        try fm.createDirectory(at: workspace, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: workspace) }
+        var items = inherited
+        for (index, url) in urls.enumerated() {
+            guard url.isFileURL, LCAppPlugins.extensions.contains(url.pathExtension.lowercased()), !url.lastPathComponent.hasPrefix(".") else {
+                throw LCPluginError("请选择 dylib、deb 或 zip 插件文件。")
+            }
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            let package = workspace.appendingPathComponent(String(index))
+            if url.pathExtension.lowercased() == "dylib" {
+                try fm.createDirectory(at: package, withIntermediateDirectories: true)
+                try fm.copyItem(at: url, to: package.appendingPathComponent(url.lastPathComponent))
+            } else { try LCUtils.extractPluginArchive(url.path, toPath: package.path) }
+            let contents = try pluginItems(in: package, recursive: true)
+            guard !contents.isEmpty else { throw LCPluginError("\(url.lastPathComponent) 内未找到可导入的库或资源。") }
+            items += contents
+        }
         var names = Set<String>()
         for item in items {
-            guard names.insert(item.lastPathComponent.lowercased()).inserted else {
-                throw LCPluginError("插件文件重名：\(item.lastPathComponent)")
-            }
+            guard names.insert(item.lastPathComponent.lowercased()).inserted else { throw LCPluginError("插件包包含重名文件：\(item.lastPathComponent)") }
+            _ = try regularFiles(in: item)
         }
-        let bundleInfo = try PropertyListSerialization.propertyList(from: Data(contentsOf: bundle.appendingPathComponent("Info.plist")), format: nil) as? [String: Any]
-        guard let executable = bundleInfo?["CFBundleExecutable"] as? String,
-              !executable.isEmpty, executable == (executable as NSString).lastPathComponent else {
-            throw LCPluginError("Guest 缺少有效的主程序文件名。")
-        }
-        var hash = SHA256()
-        for item in items.sorted(by: { $0.path < $1.path }) {
-            hash.update(data: Data(relativePath(from: root, to: item).utf8))
-            for file in try regularFiles(in: item) {
-                hash.update(data: Data(relativePath(from: root, to: file).utf8))
-                hash.update(data: try Data(contentsOf: file, options: .mappedIfSafe))
-            }
-        }
-        // Rebuild when the bundled Substrate compatibility runtime changes too.
-        let runtime = Bundle.main.bundleURL.appendingPathComponent("Frameworks/CydiaSubstrate.framework")
-        for file in try regularFiles(in: runtime) {
-            hash.update(data: try Data(contentsOf: file, options: .mappedIfSafe))
-        }
-        let fingerprint = hash.finalize().map { String(format: "%02x", $0) }.joined()
-        if previous?.revision == 1, previous?.fingerprint == fingerprint,
-           previous?.executable == executable { return nil }
-
         let staged = bundle.deletingLastPathComponent().appendingPathComponent(".LCPlugin-\(UUID().uuidString)")
         do {
             try fm.copyItem(at: bundle, to: staged)
-            let backup = staged.appendingPathComponent(stateDirectory)
-            if let previous {
-                guard previous.executable == executable else {
-                    throw LCPluginError("插件备份与当前主程序不一致，请覆盖安装原始 IPA。")
-                }
-                for path in previous.injectedFiles {
-                    let file = try contained(path, in: staged)
-                    if fm.fileExists(atPath: file.path) { try fm.removeItem(at: file) }
-                }
-                let original = backup.appendingPathComponent("Executable")
-                guard fm.fileExists(atPath: original.path) else {
-                    throw LCPluginError("插件原始主程序备份缺失，请覆盖安装原始 IPA。")
-                }
-                try fm.removeItem(at: staged.appendingPathComponent(executable))
-                try fm.copyItem(at: original, to: staged.appendingPathComponent(executable))
-            } else {
-                guard !fm.fileExists(atPath: backup.path) else {
-                    throw LCPluginError("插件备份目录冲突，请覆盖安装原始 IPA。")
-                }
-                try fm.createDirectory(at: backup, withIntermediateDirectories: true)
-                try fm.copyItem(at: staged.appendingPathComponent(executable), to: backup.appendingPathComponent("Executable"))
+            // Legacy source copies and backups are never needed by this workflow.
+            for name in [".LCPlugins", stateDirectory] {
+                let old = staged.appendingPathComponent(name)
+                if fm.fileExists(atPath: old.path) { try fm.removeItem(at: old) }
             }
-
+            var injectedFiles = previous?.injectedFiles ?? []
+            var images = previous?.images ?? []
+            var removedLoads = Set<String>()
+            if !paths.isEmpty {
+                guard paths.allSatisfy({ path in
+                    previous?.injectedFiles.contains(path) == true || inspection.images.contains { $0.id == path || $0.id.hasPrefix(path + "/") }
+                }) else { throw LCPluginError("所选库不存在，请刷新列表。") }
+                let removed = try paths.map { try contained($0, in: staged) }
+                for reference in inspection.references where paths.contains(where: { reference.target == $0 || reference.target.hasPrefix($0 + "/") }) {
+                    if reference.loader == executable {
+                        removedLoads.insert(reference.load)
+                    } else if !paths.contains(where: { reference.loader == $0 || reference.loader.hasPrefix($0 + "/") }) {
+                        throw LCPluginError("\(reference.loader) 仍依赖 \(reference.target)，请先移除依赖它的插件。")
+                    }
+                }
+                for file in removed where fm.fileExists(atPath: file.path) { try fm.removeItem(at: file) }
+                injectedFiles.removeAll { path in paths.contains { path == $0 || path.hasPrefix($0 + "/") } }
+                images.removeAll { image in paths.contains { image == $0 || image.hasPrefix($0 + "/") } }
+            }
             let frameworks = staged.appendingPathComponent("Frameworks")
             try fm.createDirectory(at: frameworks, withIntermediateDirectories: true)
-            var injectedFiles: [String] = []
             var binaries: [URL] = []
             for item in items {
                 let relative = (item.pathExtension.lowercased() == "bundle" ? "" : "Frameworks/") + item.lastPathComponent
                 let destination = try contained(relative, in: staged)
-                guard !fm.fileExists(atPath: destination.path) else {
-                    throw LCPluginError("插件与原应用文件冲突：\(relative)")
+                for reference in inspection.references where reference.loader == executable &&
+                    (reference.target == relative || reference.target.hasPrefix(relative + "/")) {
+                    removedLoads.insert(reference.load)
                 }
+                if fm.fileExists(atPath: destination.path) { try fm.removeItem(at: destination) }
+                images.removeAll { $0 == relative || $0.hasPrefix(relative + "/") }
                 try fm.copyItem(at: item, to: destination)
-                injectedFiles.append(relative)
+                if !injectedFiles.contains(relative) { injectedFiles.append(relative) }
                 if item.pathExtension.lowercased() != "bundle" { binaries.append(try binaryURL(destination)) }
             }
             let aliases: Set<String> = ["CydiaSubstrate", "libsubstrate.dylib"]
             let needsRuntime = try binaries.contains { binary in
                 try LCPluginMachO(url: binary).dependencies.contains { aliases.contains(($0 as NSString).lastPathComponent) }
             }
+            let runtime = Bundle.main.bundleURL.appendingPathComponent("Frameworks/CydiaSubstrate.framework")
             let embeddedRuntime = frameworks.appendingPathComponent("CydiaSubstrate.framework")
             if needsRuntime, !fm.fileExists(atPath: embeddedRuntime.path) {
                 try fm.copyItem(at: runtime, to: embeddedRuntime)
@@ -140,16 +160,17 @@ struct LCPluginPreparation {
             var macho = try LCPluginMachO(url: main)
             try macho.requireARM64()
             try macho.requireDecrypted()
-            let images = binaries.map { String($0.path.dropFirst(staged.path.count + 1)) }
-            let loads = images.map { "@loader_path/" + $0 }
-            try macho.edit(add: loads)
+            let addedImages = binaries.map { String($0.path.dropFirst(staged.path.count + 1)) }
+            images = Array(Set(images + addedImages)).sorted()
+            let loads = addedImages.map { "@loader_path/" + $0 }
+            try macho.edit(add: loads, remove: removedLoads)
             try macho.write(to: main)
             try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: main.path)
             guard Set(loads).isSubset(of: Set(try LCPluginMachO(url: main).dependencies)) else {
                 throw LCPluginError("插件注入回读校验失败。")
             }
-            let manifest = Manifest(revision: 1, fingerprint: fingerprint, executable: executable,
-                                    injectedFiles: injectedFiles, images: images)
+            let manifest = Manifest(revision: 3, executable: executable,
+                                    injectedFiles: injectedFiles.sorted(), images: images)
             try PropertyListEncoder().encode(manifest).write(to: staged.appendingPathComponent(manifestName), options: .atomic)
             return staged
         } catch {
@@ -169,7 +190,7 @@ struct LCPluginPreparation {
         var result: [URL] = []
         for item in try fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isSymbolicLinkKey, .isDirectoryKey]).sorted(by: { $0.path < $1.path }) {
             let name = item.lastPathComponent
-            if name.hasPrefix(".") || name.hasSuffix(".disabled") || name == "TweakLoader.dylib" { continue }
+            if name.hasPrefix(".") || name == "__MACOSX" || name.hasSuffix(".disabled") || name == "TweakLoader.dylib" { continue }
             let values = try item.resourceValues(forKeys: [.isSymbolicLinkKey, .isDirectoryKey])
             guard values.isSymbolicLink != true else { continue }
             if ["dylib", "framework", "bundle"].contains(item.pathExtension.lowercased()) {
@@ -199,7 +220,7 @@ struct LCPluginPreparation {
         return url
     }
 
-    private static func binaryURL(_ url: URL) throws -> URL {
+    static func binaryURL(_ url: URL) throws -> URL {
         guard url.pathExtension.lowercased() == "framework" else { return url }
         let data = try Data(contentsOf: url.appendingPathComponent("Info.plist"))
         let info = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
