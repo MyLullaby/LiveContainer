@@ -16,7 +16,10 @@ struct LCPluginMachO {
     private let slices: [Slice]
     private static let loads: Set<UInt32> = [0xc, 0x80000018, 0x8000001f, 0x80000023, 0x20]
 
-    public init(url: URL) throws { try self.init(data: Data(contentsOf: url)) }
+    public init(url: URL) throws {
+        do { try self.init(data: Data(contentsOf: url)) }
+        catch { throw LCPluginError("\(url.lastPathComponent)：\(error.localizedDescription)") }
+    }
     public init(data: Data) throws {
         self.data = data
         let magic = try data.word(0)

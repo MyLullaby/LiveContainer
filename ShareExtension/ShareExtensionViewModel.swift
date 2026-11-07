@@ -447,6 +447,35 @@ final class ShareExtensionViewModel: ObservableObject {
         return ext == "ipa" || ext == "tipa"
     }
 
+    func shouldShowPluginImportAction() -> Bool {
+        guard case .file(let url) = payload.kind else { return false }
+        return ["dylib", "deb", "zip"].contains(url.pathExtension.lowercased())
+    }
+
+    func importSharedPlugin(context: NSExtensionContext?) async {
+        guard !isLaunching, case .file(let fileURL) = payload.kind else { return }
+        isLaunching = true
+        defer { isLaunching = false }
+        do {
+            guard let root = appGroupRootURL else { throw ShareExtensionError("无法访问共享目录。") }
+            let fm = FileManager.default
+            let folder = root.appendingPathComponent("PluginInbox/\(UUID().uuidString)")
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            let accessed = fileURL.startAccessingSecurityScopedResource()
+            defer { if accessed { fileURL.stopAccessingSecurityScopedResource() } }
+            let copy = folder.appendingPathComponent(fileURL.lastPathComponent)
+            do { try fm.copyItem(at: fileURL, to: copy) }
+            catch { try? fm.removeItem(at: folder); throw error }
+            guard var components = URLComponents(string: "livecontainer://return-to-library") else { return }
+            components.queryItems = [URLQueryItem(name: "plugin-url", value: copy.absoluteString)]
+            guard let url = components.url else { throw ShareExtensionError("无法创建插件导入链接。") }
+            sharedDefaults?.set(copy.absoluteString, forKey: "LCPluginPendingImportURL")
+            sharedDefaults?.synchronize()
+            LCShareExtensionLauncher.openURL(fromShareExtension: url)
+            (context ?? currentContext)?.completeRequest(returningItems: nil, completionHandler: nil)
+        } catch { errorMessage = error.localizedDescription }
+    }
+
     func installSharedFileInLiveContainer(context: NSExtensionContext?) async {
         if isLaunching {
             return

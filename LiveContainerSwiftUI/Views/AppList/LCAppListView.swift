@@ -40,6 +40,9 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     @State var didAppear = false
     // ipa choosing stuff
     @State var choosingIPA = false
+    @State private var choosingPlugin = false
+    @State private var pluginImport: LCPluginImportRequest?
+    @State private var receivedPluginURL: URL?
     @State var errorShow = false
     @State var errorInfo = ""
     
@@ -228,6 +231,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                                 Button("lc.appList.installFromUrl".loc, systemImage: "link.badge.plus", action: {
                                     Task{ await startInstallFromUrl() }
                                 })
+                                Button("导入插件", systemImage: "puzzlepiece.extension") { choosingPlugin = true }
                             } label: {
                                 Label("add", systemImage: "plus")
                             }
@@ -307,6 +311,13 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         }, onDismiss: {
             choosingIPA = false
         })
+        .betterFileImporter(isPresented: $choosingPlugin, types: [.dylib, .deb, .zip], multiple: true, callback: { urls in
+            receivePlugins(urls)
+        }, onDismiss: { choosingPlugin = false })
+        .sheet(item: $pluginImport, onDismiss: { receivedPluginURL = nil }) { request in
+            LCPluginImportView(request: request)
+                .environmentObject(sharedModel)
+        }
         .alert("lc.appList.installation".loc, isPresented: $installReplaceAlert.show) {
             ForEach(installOptions, id: \.self) { installOption in
                 Button(role: installOption.isReplace ? .destructive : nil, action: {
@@ -420,6 +431,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             sharedModel.deepLink = nil
             handleURL(url: link)
         }
+        .onForeground { receivePendingPlugin() }
         .onDrop(of: [.url], isTargeted: nil) { providers in
             guard let provider = providers.first else { return false }
             _ = provider.loadObject(ofClass: URL.self) { url, error in
@@ -499,6 +511,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             app.delegate = self
         }
         didAppear = true
+        receivePendingPlugin()
     }
 
     func refreshApps() {
@@ -722,6 +735,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         
         if let appToReplace {
             // copy previous configration to new app
+            try LCAppPlugins.preserveSources(from: appToReplace.appInfo, to: finalNewApp)
             finalNewApp.autoSaveDisabled = true
             finalNewApp.isLocked = appToReplace.appInfo.isLocked
             finalNewApp.isHidden = appToReplace.appInfo.isHidden
@@ -1206,6 +1220,10 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     
     func handleURL(url : URL) {
         if url.isFileURL {
+            if LCAppPlugins.extensions.contains(url.pathExtension.lowercased()) {
+                receivePlugins([url])
+                return
+            }
             Task { await installFromUrl(urlStr: url.absoluteString) }
             return
         }
@@ -1255,6 +1273,12 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                     Task { await launchAppWithBundleId(bundleId: bundleId, container: containerName, urlStr: urlStr, forceJIT: forceJIT) }
                 }
             }
+        } else if url.host == "import-plugin" {
+            if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+               let value = components.queryItems?.first(where: { $0.name == "url" })?.value,
+               let file = URL(string: value), file.isFileURL {
+                receivePlugins([file], resolveShareBookmark: true)
+            }
         } else if url.host == "install" {
             if let components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
                 var installUrl : String? = nil
@@ -1268,6 +1292,30 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                 }
             }
         }
+    }
+
+    private func receivePlugins(_ urls: [URL], resolveShareBookmark: Bool = false) {
+        guard sharedModel.multiLCStatus != 2 else {
+            errorInfo = "lc.appList.manageInPrimaryTip".loc
+            errorShow = true
+            return
+        }
+        if urls.count == 1 && receivedPluginURL == urls.first { return }
+        do {
+            pluginImport = try LCPluginImportRequest(files: urls, resolveShareBookmark: resolveShareBookmark)
+            receivedPluginURL = urls.count == 1 ? urls.first : nil
+        } catch {
+            errorInfo = error.localizedDescription
+            errorShow = true
+        }
+    }
+
+    private func receivePendingPlugin() {
+        guard sharedModel.multiLCStatus != 2 else { return }
+        guard let value = LCUtils.appGroupUserDefault.string(forKey: "LCPluginPendingImportURL"),
+              let url = URL(string: value) else { return }
+        LCUtils.appGroupUserDefault.removeObject(forKey: "LCPluginPendingImportURL")
+        receivePlugins([url], resolveShareBookmark: true)
     }
     
 }

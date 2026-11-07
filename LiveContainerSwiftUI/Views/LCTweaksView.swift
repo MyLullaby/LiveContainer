@@ -211,7 +211,7 @@ struct LCTweakFolderView : View {
                 renameFileInput.close(result: "")
             }
         )
-        .betterFileImporter(isPresented: $choosingTweak, types: [.dylib, .lcFramework, .deb, .zip], multiple: true, callback: { fileUrls in
+        .betterFileImporter(isPresented: $choosingTweak, types: [.dylib, .lcFramework, /*.deb*/], multiple: true, callback: { fileUrls in
             Task { await startInstallTweak(fileUrls) }
         }, onDismiss: {
             choosingTweak = false
@@ -369,26 +369,15 @@ struct LCTweakFolderView : View {
             // we will sign later before app launch
             
             for fileUrl in urls {
+                // handle deb file
                 if(!fileUrl.isFileURL) {
                     throw "lc.tweakView.notFileError %@".localizeWithFormat(fileUrl.lastPathComponent)
                 }
-                if ["deb", "zip"].contains(fileUrl.pathExtension.lowercased()) {
-                    let destination = baseUrl.appendingPathComponent(fileUrl.deletingPathExtension().lastPathComponent)
-                    guard !fm.fileExists(atPath: destination.path) else {
-                        throw LCPluginError("插件目录已存在：\(destination.lastPathComponent)")
-                    }
-                    try LCUtils.extractPluginArchive(fileUrl.path, toPath: destination.path)
-                    if try LCPluginPreparation.pluginItems(in: destination, recursive: true).isEmpty {
-                        try fm.removeItem(at: destination)
-                        throw LCPluginError("插件包内未找到 dylib、framework 或资源 bundle。")
-                    }
-                    let imported = LCTweakItem(fileUrl: destination, isFolder: true, isFramework: false, isTweak: false, isEnabled: true)
-                    tweakItems.append(imported)
-                    if isRoot { sharedModel.tweakFolderNames.append(destination.lastPathComponent) }
-                    continue
-                }
                 let toPath = self.baseUrl.appendingPathComponent(fileUrl.lastPathComponent)
-                try fm.copyItem(at: fileUrl, to: toPath)
+                try fm.moveItem(at: fileUrl, to: toPath)
+                LCParseMachO((toPath.path as NSString).utf8String, false) { path, header, _, _ in
+                    LCPatchAddRPath(path, header);
+                }
 
                 let isFramework = toPath.lastPathComponent.hasSuffix(".framework")
                 let isTweak = toPath.lastPathComponent.hasSuffix(".dylib")

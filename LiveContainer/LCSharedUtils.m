@@ -189,6 +189,14 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
         NSLog(@"[LC][RTL] not handled: scheme mismatch (url.scheme=%@ mine=%@)", url.scheme, NSUserDefaults.lcAppUrlScheme);
         return LCReturnToLibraryResultNotHandled;
     }
+    for (NSURLQueryItem *item in [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO].queryItems) {
+        if (![item.name isEqualToString:@"plugin-url"]) continue;
+        NSURL *file = item.value ? [NSURL URLWithString:item.value] : nil;
+        if (file.isFileURL && [@[@"dylib", @"deb", @"zip"] containsObject:file.pathExtension.lowercaseString]) {
+            [NSUserDefaults.lcSharedDefaults setObject:file.absoluteString forKey:@"LCPluginPendingImportURL"];
+            [NSUserDefaults.lcSharedDefaults synchronize];
+        }
+    }
     return [self returnToLibrary];
 }
 

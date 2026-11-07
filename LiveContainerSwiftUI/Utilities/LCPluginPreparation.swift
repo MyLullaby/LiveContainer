@@ -22,23 +22,11 @@ struct LCPluginPreparation {
         let manifestURL = bundle.appendingPathComponent(manifestName)
         let previous = try fm.fileExists(atPath: manifestURL.path)
             ? PropertyListDecoder().decode(Manifest.self, from: Data(contentsOf: manifestURL)) : nil
-        let root = app.isShared ? LCPath.lcGroupTweakPath : LCPath.tweakPath
-        var items = try pluginItems(in: root, recursive: false)
-        if let folder = app.tweakFolder, !folder.isEmpty {
-            guard folder == (folder as NSString).lastPathComponent, folder != ".", folder != ".." else {
-                throw LCPluginError("插件目录名称无效。")
-            }
-            let selected = root.appendingPathComponent(folder)
-            if fm.fileExists(atPath: selected.path) {
-                items += try pluginItems(in: selected, recursive: true)
-            }
-        }
+        let root = LCAppPlugins.directory(app: app)
+        let items = try pluginItems(in: root, recursive: true)
         guard !items.isEmpty || previous != nil else { return nil }
-        guard app.dontInjectTweakLoader && app.dontLoadTweakLoader else {
-            // Explicitly enabled legacy loading continues to use the original loader.
-            guard let previous else { return nil }
-            if previous.injectedFiles.isEmpty && previous.images.isEmpty { return nil }
-            throw LCPluginError("此应用已使用直接注入插件，请先移除插件并启动一次，再启用旧版 TweakLoader。")
+        if !items.isEmpty && (!app.dontInjectTweakLoader || !app.dontLoadTweakLoader) {
+            throw LCPluginError("请先在应用设置中打开“不注入 TweakLoader”和“不加载 TweakLoader”，再使用独立插件列表。")
         }
         guard !app.is32bit else { throw LCPluginError("直接注入插件暂不支持 32 位 Guest。") }
         var names = Set<String>()
@@ -54,9 +42,9 @@ struct LCPluginPreparation {
         }
         var hash = SHA256()
         for item in items.sorted(by: { $0.path < $1.path }) {
-            hash.update(data: Data(item.path.utf8))
+            hash.update(data: Data(relativePath(from: root, to: item).utf8))
             for file in try regularFiles(in: item) {
-                hash.update(data: Data(file.path.utf8))
+                hash.update(data: Data(relativePath(from: root, to: file).utf8))
                 hash.update(data: try Data(contentsOf: file, options: .mappedIfSafe))
             }
         }

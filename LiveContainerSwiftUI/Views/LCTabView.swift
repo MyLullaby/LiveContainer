@@ -120,6 +120,13 @@ struct LCTabView: View {
         NSLog("[LC][RTL] dispatchURL result=%@ url=%@", String(describing: returnResult), url.absoluteString)
         if returnResult != .notHandled {
             sharedModel.selectedTab = .apps
+            if returnResult == .showAppList, sharedModel.multiLCStatus != 2,
+               let value = LCUtils.appGroupUserDefault.string(forKey: "LCPluginPendingImportURL") {
+                var components = URLComponents(string: "livecontainer://import-plugin")!
+                components.queryItems = [URLQueryItem(name: "url", value: value)]
+                sharedModel.deepLink = components.url
+                LCUtils.appGroupUserDefault.removeObject(forKey: "LCPluginPendingImportURL")
+            }
             if #available(iOS 16.0, *) {
                 MultitaskDockManager.shared.minimizeAllWindows()
             }
@@ -142,7 +149,7 @@ struct LCTabView: View {
             }
             
             switch host {
-            case "livecontainer-launch", "install", "open-web-page", "open-url":
+            case "livecontainer-launch", "install", "import-plugin", "open-web-page", "open-url":
                 sharedModel.selectedTab = .apps
             case "certificate":
                 sharedModel.selectedTab = .settings

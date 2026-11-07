@@ -441,11 +441,28 @@ class LCAppModel: ObservableObject, Hashable {
         }
 
         guard !appInfo.dontInjectTweakLoader || !appInfo.dontLoadTweakLoader else { return }
+        guard let tweakFolder = appInfo.tweakFolder else { return }
         let root = appInfo.isShared ? LCPath.lcGroupTweakPath : LCPath.tweakPath
-        if let tweakFolder = appInfo.tweakFolder {
-            try await LCUtils.signTweaks(tweakFolderUrl: root.appendingPathComponent(tweakFolder), force: force)
+        try await LCUtils.signTweaks(tweakFolderUrl: root.appendingPathComponent(tweakFolder), force: force) { _ in
+            Task { await MainActor.run { self.isSigningInProgress = true } }
         }
-        try await LCUtils.signTweaks(tweakFolderUrl: root, force: force)
+        try await LCUtils.signTweaks(tweakFolderUrl: LCPath.tweakPath, force: force) { _ in
+            Task { await MainActor.run { self.isSigningInProgress = true } }
+        }
+    }
+
+    @MainActor func updatePlugins(importing urls: [URL] = [], removing name: String? = nil) async throws {
+        guard !isAppRunning, !isSigningInProgress else { throw LCPluginError("应用正在处理中，请稍后重试。") }
+        for container in appInfo.containers {
+            if LCSharedUtils.getContainerUsingLCScheme(withFolderName: container.folderName) != nil {
+                throw LCPluginError("请先退出正在运行的应用，再修改插件。")
+            }
+        }
+        isAppRunning = true
+        defer { isAppRunning = false }
+        if !urls.isEmpty { try LCAppPlugins.importFiles(urls, app: appInfo) }
+        if let name { try LCAppPlugins.remove(name, app: appInfo) }
+        try await signApp()
     }
 
     private func signApp(_ info: LCAppInfo, force: Bool) async throws {

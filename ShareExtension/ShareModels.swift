@@ -40,6 +40,29 @@ final class SharePayload: ObservableObject {
                 }
             }
         }
+        for provider in providers {
+            guard let type = provider.registeredTypeIdentifiers.first(where: {
+                guard let content = UTType($0) else { return false }
+                return content.conforms(to: .data)
+            }) else { continue }
+            let url: URL = try await withCheckedThrowingContinuation { continuation in
+                provider.loadFileRepresentation(forTypeIdentifier: type) { url, error in
+                    guard let url else {
+                        continuation.resume(throwing: error ?? ShareExtensionError("无法读取分享文件。"))
+                        return
+                    }
+                    do {
+                        let fm = FileManager.default
+                        let folder = fm.temporaryDirectory.appendingPathComponent("LCShare-\(UUID().uuidString)")
+                        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+                        let copy = folder.appendingPathComponent(url.lastPathComponent)
+                        try fm.copyItem(at: url, to: copy)
+                        continuation.resume(returning: copy)
+                    } catch { continuation.resume(throwing: error) }
+                }
+            }
+            return .file(url)
+        }
         return .empty
     }
 }

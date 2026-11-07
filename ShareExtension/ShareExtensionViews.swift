@@ -68,7 +68,25 @@ struct ShareExtensionRootView: View {
                 if showsInstallAction {
                     ShareInstallGridEntry(viewModel: viewModel, extensionContext: extensionContext)
                 }
-                if apps.isEmpty && !showsInstallAction {
+                if viewModel.shouldShowPluginImportAction() {
+                    Button {
+                        Task { await viewModel.importSharedPlugin(context: extensionContext) }
+                    } label: {
+                        VStack(spacing: 7) {
+                            Image(systemName: "puzzlepiece.extension")
+                                .font(.system(size: 25, weight: .semibold))
+                                .frame(width: 52, height: 52)
+                                .background(Color(.secondarySystemBackground))
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            Text("导入插件")
+                                .font(.caption)
+                                .frame(width: 64, height: 32, alignment: .top)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.isLaunching)
+                }
+                if apps.isEmpty && !showsInstallAction && !viewModel.shouldShowPluginImportAction() {
                     ShareSuggestedPlaceholderLabel()
                 } else {
                     ForEach(apps) { app in

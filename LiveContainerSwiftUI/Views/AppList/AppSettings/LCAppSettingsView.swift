@@ -22,7 +22,7 @@ struct LCAppSettingsView: View {
         }
     }
     
-    private var appInfo : LCAppInfo
+    private var appInfo: LCAppInfo { model.appInfo }
     
     @ObservedObject private var model : LCAppModel
     
@@ -43,12 +43,16 @@ struct LCAppSettingsView: View {
     @EnvironmentObject private var sharedModel : SharedModel
     
     init(model: LCAppModel) {
-        self.appInfo = model.appInfo
         self._model = ObservedObject(wrappedValue: model)
     }
     
     var body: some View {
         Form {
+            if !(model.appInfo is BuiltInSideStoreAppInfo) {
+                Section {
+                    NavigationLink("应用插件") { LCAppPluginsView(model: model) }
+                }
+            }
             Section {
                 HStack {
                     Text("lc.appSettings.bundleId".loc)

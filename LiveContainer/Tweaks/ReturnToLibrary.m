@@ -64,6 +64,13 @@ void LCReturnToLibraryHooksInit(void) {
     if (!NSUserDefaults.lcGuestAppId) return;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
+        // Plugin imports belong to the main library even while a guest owns its process.
+        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *notification) {
+            if ([NSUserDefaults.lcAppUrlScheme isEqualToString:@"livecontainer"] &&
+                [NSUserDefaults.lcSharedDefaults stringForKey:@"LCPluginPendingImportURL"].length) {
+                [LCSharedUtils returnToLibrary];
+            }
+        }];
         BOOL managerTapAvailable = [UIStatusBarManager instancesRespondToSelector:@selector(handleTapAction:)];
         BOOL localTapAvailable = [UIApplication instancesRespondToSelector:@selector(_scrollsToTopInitiatorView:touchesEnded:withEvent:)];
         if (localTapAvailable) {
