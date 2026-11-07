@@ -14,6 +14,7 @@ struct LCPluginMachO {
     struct Command { let type: UInt32; var bytes: Data }
     private var data: Data
     private let slices: [Slice]
+    private let commandAlignment: Int
     private static let loads: Set<UInt32> = [0xc, 0x80000018, 0x8000001f, 0x80000023, 0x20]
 
     public init(url: URL) throws {
@@ -21,7 +22,18 @@ struct LCPluginMachO {
         catch { throw LCPluginError("\(url.lastPathComponent)：\(error.localizedDescription)") }
     }
     public init(data: Data) throws {
+        try self.init(data: data, commandAlignment: 8)
+    }
+
+    // Some injection tools leave 4-byte alignment. Only read dependencies this way; editing stays strict.
+    static func inspectDependencies(at url: URL) throws -> (dependencies: [String], runtimeSearchPaths: Set<String>) {
+        let macho = try LCPluginMachO(data: Data(contentsOf: url), commandAlignment: 4)
+        return (try macho.dependencies, try macho.runtimeSearchPaths)
+    }
+
+    private init(data: Data, commandAlignment: Int) throws {
         self.data = data
+        self.commandAlignment = commandAlignment
         let magic = try data.word(0)
         if magic == 0xfeedfacf {
             slices = [Slice(offset: 0, size: data.count)]
@@ -151,7 +163,7 @@ struct LCPluginMachO {
             guard p + 8 <= end else { throw LCPluginError("Mach-O 加载命令被截断。") }
             let type = try data.word(p)
             let length = Int(try data.word(p + 4))
-            guard length >= 8, length % 8 == 0, length <= end - p else { throw LCPluginError("Mach-O 加载命令格式错误。") }
+            guard length >= 8, length % commandAlignment == 0, length <= end - p else { throw LCPluginError("Mach-O 加载命令格式错误。") }
             result.append(Command(type: type, bytes: data.subdata(in: p..<(p + length))))
             p += length
         }

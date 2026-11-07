@@ -11,7 +11,6 @@ enum LCAppPlugins {
 
     struct Inspection {
         let images: [Image]
-        let warnings: [String]
         let references: [Reference]
     }
     struct Reference {
@@ -34,14 +33,12 @@ enum LCAppPlugins {
         }
         let main = bundle.appendingPathComponent(executable)
         var files = Set<URL>()
-        var warnings: [String] = []
         if let enumerator = fm.enumerator(at: bundle, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
             for case let url as URL in enumerator {
                 if url.pathExtension.lowercased() == "dylib", try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true {
                     files.insert(url.resolvingSymlinksInPath())
-                } else if url.pathExtension.lowercased() == "framework" {
-                    do { files.insert(try LCPluginPreparation.binaryURL(url).resolvingSymlinksInPath()) }
-                    catch { warnings.append(error.localizedDescription) }
+                } else if url.pathExtension.lowercased() == "framework", let binary = try? LCPluginPreparation.binaryURL(url) {
+                    files.insert(binary.resolvingSymlinksInPath())
                 }
             }
         }
@@ -61,15 +58,10 @@ enum LCAppPlugins {
             guard visited.insert(image).inserted else { continue }
             let loads: [String]
             let paths: [URL]
-            do {
-                let macho = try LCPluginMachO(url: image)
-                loads = try macho.dependencies
-                dependencies[image] = loads
-                paths = try macho.runtimeSearchPaths.sorted().compactMap { expand($0 + "/", loader: image.deletingLastPathComponent()) } + inheritedPaths
-            } catch {
-                warnings.append(error.localizedDescription)
-                continue
-            }
+            guard let inspection = try? LCPluginMachO.inspectDependencies(at: image) else { continue }
+            loads = inspection.dependencies
+            dependencies[image] = loads
+            paths = inspection.runtimeSearchPaths.sorted().compactMap { expand($0 + "/", loader: image.deletingLastPathComponent()) } + inheritedPaths
             for load in loads {
                 if load.hasPrefix("/System/") || load.hasPrefix("/usr/lib/") { continue }
                 var candidates: [URL]
@@ -79,10 +71,7 @@ enum LCAppPlugins {
                     candidates = expand(load, loader: image.deletingLastPathComponent()).map { [$0] } ?? []
                 }
                 candidates = candidates.filter { $0.path.hasPrefix(bundle.path + "/") }
-                guard let target = candidates.first(where: { fm.fileExists(atPath: $0.path) }) ?? candidates.first else {
-                    warnings.append("\(image.lastPathComponent)：未能在应用内解析依赖 \(load)")
-                    continue
-                }
+                guard let target = candidates.first(where: { fm.fileExists(atPath: $0.path) }) else { continue }
                 files.insert(target)
                 linked.insert(target)
                 references.append(Reference(loader: String(image.path.dropFirst(bundle.path.count + 1)), load: load,
@@ -93,15 +82,14 @@ enum LCAppPlugins {
         let managed = Set((manifest?.images ?? []).map { bundle.appendingPathComponent($0).standardizedFileURL.resolvingSymlinksInPath() })
         files.formUnion(managed)
         let classifications = try draft ?? savedClassifications(app: app)
-        let hookRuntimes: Set<String> = ["cydiasubstrate", "libsubstrate.dylib", "libhooker.dylib", "libellekit.dylib", "ellekit", "libsubstitute.dylib"]
+        let hookRuntimes: Set<String> = ["cydiasubstrate", "libsubstrate.dylib", "libhooker.dylib", "libellekit.dylib", "ellekit", "libsubstitute.dylib", "libjailedshim.dylib"]
         // shortcut: hook-runtime dependencies identify common injected plugins; other libraries need user classification without an original IPA.
         var detected = Set<URL>()
         for file in files where file != main && file.path.hasPrefix(bundle.path + "/") {
             let loads: [String]
             if let known = dependencies[file] { loads = known }
             else {
-                do { loads = try LCPluginMachO(url: file).dependencies }
-                catch { warnings.append(error.localizedDescription); continue }
+                loads = (try? LCPluginMachO.inspectDependencies(at: file).dependencies) ?? []
             }
             if hookRuntimes.contains(file.lastPathComponent.lowercased()) || loads.contains(where: { hookRuntimes.contains(($0 as NSString).lastPathComponent.lowercased()) }) {
                 detected.insert(file)
@@ -113,7 +101,7 @@ enum LCAppPlugins {
                          linked: linked.contains(file), exists: fm.fileExists(atPath: file.path),
                          isPlugin: managed.contains(file) || (classifications[relative] ?? detected.contains(file)))
         }.sorted { $0.id.localizedStandardCompare($1.id) == .orderedAscending }
-        return Inspection(images: images, warnings: Array(Set(warnings)).sorted(), references: references)
+        return Inspection(images: images, references: references)
     }
 
     static func savedClassifications(app: LCAppInfo) throws -> [String: Bool] {

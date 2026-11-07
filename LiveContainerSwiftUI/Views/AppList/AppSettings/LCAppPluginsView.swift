@@ -37,11 +37,8 @@ struct LCAppPluginsView: View {
                             libraryRow(image)
                         }
                     }
-                    ForEach(inspection.warnings, id: \.self) { warning in
-                        Text(warning).font(.footnote).foregroundColor(.orange).textSelection(.enabled)
-                    }
                 } header: { Text("插件管理") } footer: {
-                    Text("包含 LC 导入和根据注入特征识别的插件。未识别的插件可在“其他库”中纳入管理；长按已识别项可标记为应用原有库。调整后点击“确认并隐藏插件”，下次启动生效；分类不会改变加载方式。")
+                    Text("包含 LC 导入和根据注入特征识别的插件，未识别的默认归入应用原有库。可在“其他库”中手动纳入管理；长按插件可标记为应用原有库。调整后点击“确认并隐藏插件”，下次启动生效；分类不会改变加载方式。")
                 }
             }
             Section {
@@ -95,7 +92,7 @@ struct LCAppPluginsView: View {
                         .font(.caption).buttonStyle(.borderless)
                 }
             }
-            Text("\(image.managed ? "LC 导入" : image.isPlugin ? "IPA 内第三方插件" : "来源未确认") · \(image.linked ? "在静态加载链中" : "文件存在")")
+            Text("\(image.managed ? "LC 导入" : image.isPlugin ? "IPA 内第三方插件" : "应用原有库") · \(image.linked ? "在静态加载链中" : "文件存在")")
                 .font(.caption).foregroundColor(.secondary)
         }
         .contextMenu {
