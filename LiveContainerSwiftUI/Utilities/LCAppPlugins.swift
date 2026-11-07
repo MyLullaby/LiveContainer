@@ -107,7 +107,7 @@ enum LCAppPlugins {
                 detected.insert(file)
             }
         }
-        let images = files.filter { $0 != main && $0.path.hasPrefix(bundle.path + "/") }.map { file in
+        let images = files.filter { $0 != main && $0.path.hasPrefix(bundle.path + "/") }.map { file -> Image in
             let relative = String(file.path.dropFirst(bundle.path.count + 1))
             return Image(id: relative, managed: managed.contains(file),
                          linked: linked.contains(file), exists: fm.fileExists(atPath: file.path),
