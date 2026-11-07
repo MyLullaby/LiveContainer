@@ -198,7 +198,11 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                         .foregroundStyle(.gray)
                         .animation(searchContext.isTyping ? nil : .easeInOut, value: appCount)
                         .onTapGesture(count: 3) {
-                            Task { await authenticateUser() }
+                            if sharedModel.isHiddenAppUnlocked {
+                                sharedModel.isHiddenAppUnlocked = false
+                            } else {
+                                Task { await authenticateUser() }
+                            }
                         }
                 }.animation(searchContext.isTyping ? nil : .easeInOut, value: LCUtils.appGroupUserDefault.bool(forKey: "LCStrictHiding"))
 
