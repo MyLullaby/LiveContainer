@@ -6,6 +6,7 @@
 //
 #include <dlfcn.h>
 #include <stdlib.h>
+#include <pthread.h>
 #include <sys/mman.h>
 #import "../../litehook/src/litehook.h"
 #import "LCMachOUtils.h"
@@ -56,8 +57,10 @@ static void ensureBreakpointExceptionHandler(void) {
     pthread_create(&thread, NULL, exception_handler, NULL);
 }
 
+static const struct mach_header *guestMainHeader;
+
 static void overwriteAppExecutableFileType(void) {
-    struct mach_header_64* appImageMachOHeader = (struct mach_header_64*) orig_dyld_get_image_header(appMainImageIndex);
+    struct mach_header_64* appImageMachOHeader = (struct mach_header_64*)guestMainHeader;
     kern_return_t kret = builtin_vm_protect(mach_task_self(), (vm_address_t)appImageMachOHeader, sizeof(appImageMachOHeader), false, PROT_READ | PROT_WRITE | VM_PROT_COPY);
     if(kret != KERN_SUCCESS) {
         NSLog(@"[LC] failed to change appImageMachOHeader to rw");
@@ -68,10 +71,14 @@ static void overwriteAppExecutableFileType(void) {
     }
 }
 
-static NSArray<NSString *> *hiddenPluginPaths;
+static NSSet<NSString *> *hiddenPluginPaths;
 static const char *guestExecutablePath;
 static bool guestImageLoaded;
 static const mach_header_u *rebinderImage;
+
+static const char *imagePathWithoutPrivatePrefix(const char *path) {
+    return !strncmp(path, "/private/", 9) ? path + 8 : path;
+}
 
 static bool shouldFilterImageAPIs(const mach_header_u *header) {
     // The rebinder must enumerate real images to install hooks on later libraries.
@@ -84,44 +91,103 @@ void LCSetGuestExecutablePath(const char *path) {
     if (!guestExecutablePath) guestExecutablePath = strdup(path);
 }
 
+typedef struct {
+    const struct mach_header *header;
+    intptr_t slide;
+    const char *name;
+    bool hidden;
+} LCLoadedImage;
+
+static LCLoadedImage *loadedImages;
+static uint32_t loadedImageCount;
+static LCLoadedImage *visibleImages;
+static uint32_t visibleImageCount;
+static const struct mach_header *hostMainHeader;
+static bool filterLoadedImages;
+static pthread_mutex_t imageRecordsLock = PTHREAD_MUTEX_INITIALIZER;
+
+// Called only when dyld adds/removes an image, never during an app's image queries.
+static void rebuildVisibleImages(void) {
+    LCLoadedImage *updated = realloc(visibleImages, loadedImageCount * sizeof(LCLoadedImage));
+    if (loadedImageCount && !updated) abort();
+    visibleImages = updated;
+    visibleImageCount = 0;
+    LCLoadedImage guest = {};
+    for (uint32_t i = 0; i < loadedImageCount; i++) {
+        if (loadedImages[i].header == guestMainHeader) { guest = loadedImages[i]; break; }
+    }
+    for (uint32_t i = 0; i < loadedImageCount; i++) {
+        LCLoadedImage image = loadedImages[i];
+        if (filterLoadedImages && image.header == guestMainHeader) continue;
+        if (filterLoadedImages && image.header == hostMainHeader && guest.header) image = guest;
+        else if (filterLoadedImages && image.hidden) continue;
+        visibleImages[visibleImageCount++] = image;
+    }
+}
+
 static void guestImageAdded(const struct mach_header *header, intptr_t slide) {
-    for (uint32_t i = 0, count = orig_dyld_image_count(); i < count; i++) {
-        const char *path = orig_dyld_get_image_name(i);
-        char resolved[PATH_MAX];
-        if (orig_dyld_get_image_header(i) == header && path &&
-            !strcmp(realpath(path, resolved) ?: path, guestExecutablePath)) {
-            appMainImageIndex = i;
-            guestImageLoaded = true;
-            break;
-        }
+    const char *name = NULL;
+    uint32_t index = 0;
+    for (uint32_t count = orig_dyld_image_count(); index < count; index++) {
+        if (orig_dyld_get_image_header(index) == header) { name = orig_dyld_get_image_name(index); break; }
     }
+    if (!name) return;
+    // Resolve once at the load boundary, including aliases used by dlopen.
+    char resolved[PATH_MAX];
+    const char *path = imagePathWithoutPrivatePrefix(realpath(name, resolved) ?: name);
+    bool isGuest = guestExecutablePath && !strcmp(path, imagePathWithoutPrivatePrefix(guestExecutablePath));
+    bool hidden = false;
+    if (filterLoadedImages && header != hostMainHeader) {
+        const char *host = imagePathWithoutPrivatePrefix(lcMainBundlePath);
+        size_t hostLength = strlen(host);
+        hidden = (!strncmp(path, host, hostLength) && path[hostLength] == '/') || strstr(path, "/procursus/") ||
+            [hiddenPluginPaths containsObject:@(path)] ||
+            [hiddenPluginPaths containsObject:@(imagePathWithoutPrivatePrefix(name))];
+    }
+    LCLoadedImage image = {header, slide, name, hidden};
+    pthread_mutex_lock(&imageRecordsLock);
+    if (isGuest) {
+        guestMainHeader = header;
+        appMainImageIndex = index;
+        guestImageLoaded = true;
+    }
+    uint32_t slot = 0;
+    while (slot < loadedImageCount && loadedImages[slot].header != header) slot++;
+    if (slot == loadedImageCount) {
+        LCLoadedImage *updated = realloc(loadedImages, (loadedImageCount + 1) * sizeof(LCLoadedImage));
+        if (!updated) abort();
+        loadedImages = updated;
+        loadedImageCount++;
+    }
+    loadedImages[slot] = image;
+    rebuildVisibleImages();
+    pthread_mutex_unlock(&imageRecordsLock);
 }
 
-static bool isHiddenImage(uint32_t index) {
-    const char *name = orig_dyld_get_image_name(index);
-    if (!name) return false;
-    if (index == appMainImageIndex && guestImageLoaded) return true;
-    if (index == lcImageIndex) return false;
-    NSString *path = @(name).stringByStandardizingPath.stringByResolvingSymlinksInPath;
-    if ([path hasPrefix:[@(lcMainBundlePath) stringByAppendingString:@"/"]] || strstr(name, "/procursus/")) return true;
-    return [hiddenPluginPaths containsObject:path];
+static void guestImageRemoved(const struct mach_header *header, intptr_t slide) {
+    pthread_mutex_lock(&imageRecordsLock);
+    for (uint32_t i = 0; i < loadedImageCount; i++) {
+        if (loadedImages[i].header != header) continue;
+        memmove(loadedImages + i, loadedImages + i + 1, (loadedImageCount - i - 1) * sizeof(LCLoadedImage));
+        loadedImageCount--;
+        break;
+    }
+    if (header == guestMainHeader) { guestMainHeader = NULL; guestImageLoaded = false; }
+    rebuildVisibleImages();
+    pthread_mutex_unlock(&imageRecordsLock);
 }
 
-static uint32_t translateImageIndex(uint32_t requested) {
-    uint32_t count = orig_dyld_image_count();
-    for (uint32_t original = 0, visible = 0; original < count; original++) {
-        if (isHiddenImage(original)) continue;
-        if (visible++ != requested) continue;
-        if (original == lcImageIndex && guestImageLoaded) {
-            if (!appExecutableFileTypeOverwritten) {
-                overwriteAppExecutableFileType();
-                appExecutableFileTypeOverwritten = true;
-            }
-            return appMainImageIndex;
-        }
-        return original;
+static LCLoadedImage visibleImageAtIndex(uint32_t index) {
+    pthread_mutex_lock(&imageRecordsLock);
+    LCLoadedImage image = index < visibleImageCount ? visibleImages[index] : (LCLoadedImage){};
+    bool isGuest = filterLoadedImages && image.header && image.header == guestMainHeader;
+    pthread_mutex_unlock(&imageRecordsLock);
+    // No dyld calls while holding the records lock: load notifications hold dyld's lock.
+    if (isGuest && !appExecutableFileTypeOverwritten) {
+        overwriteAppExecutableFileType();
+        appExecutableFileTypeOverwritten = true;
     }
-    return UINT32_MAX;
+    return image;
 }
 
 void* hook_dlsym(void * __handle, const char * __symbol) {
@@ -132,7 +198,7 @@ void* hook_dlsym(void * __handle, const char * __symbol) {
                 overwriteAppExecutableFileType();
                 appExecutableFileTypeOverwritten = true;
             }
-            return (void*)orig_dyld_get_image_header(appMainImageIndex);
+            return (void*)guestMainHeader;
         }
         // Constructors run before dlopen returns the executable handle.
         __handle = appExecutableHandle ?: RTLD_DEFAULT;
@@ -154,26 +220,22 @@ void* hook_dlsym(void * __handle, const char * __symbol) {
 }
 
 uint32_t hook_dyld_image_count(void) {
-    uint32_t visible = 0;
-    for (uint32_t i = 0, count = orig_dyld_image_count(); i < count; i++) {
-        if (!isHiddenImage(i)) visible++;
-    }
-    return visible;
+    pthread_mutex_lock(&imageRecordsLock);
+    uint32_t count = visibleImageCount;
+    pthread_mutex_unlock(&imageRecordsLock);
+    return count;
 }
 
 const struct mach_header* hook_dyld_get_image_header(uint32_t image_index) {
-    uint32_t original = translateImageIndex(image_index);
-    return original == UINT32_MAX ? NULL : orig_dyld_get_image_header(original);
+    return visibleImageAtIndex(image_index).header;
 }
 
 intptr_t hook_dyld_get_image_vmaddr_slide(uint32_t image_index) {
-    uint32_t original = translateImageIndex(image_index);
-    return original == UINT32_MAX ? 0 : orig_dyld_get_image_vmaddr_slide(original);
+    return visibleImageAtIndex(image_index).slide;
 }
 
 const char* hook_dyld_get_image_name(uint32_t image_index) {
-    uint32_t original = translateImageIndex(image_index);
-    return original == UINT32_MAX ? NULL : orig_dyld_get_image_name(original);
+    return visibleImageAtIndex(image_index).name;
 }
 
 void* getDSCAddr(void) {
@@ -404,7 +466,6 @@ void DyldHooksInit(bool hideLiveContainer, bool hookDlopen, uint32_t spoofSDKVer
     lcMainBundlePath = strdup(@(lcMainBundlePath).stringByResolvingSymlinksInPath.fileSystemRepresentation);
     orig_dyld_get_image_header = _dyld_get_image_header;
     LCSetGuestExecutablePath(NSBundle.mainBundle.executablePath.fileSystemRepresentation);
-    _dyld_register_func_for_add_image(guestImageAdded);
     
     // hook dlsym to solve RTLD_MAIN_ONLY, hook other functions to hide LiveContainer itself
     litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, dlsym, hook_dlsym, nil);
@@ -412,16 +473,26 @@ void DyldHooksInit(bool hideLiveContainer, bool hookDlopen, uint32_t spoofSDKVer
         // Keep real paths intact: Bundle/Core Data and dependency resolution need them.
         NSString *guestPath = NSBundle.mainBundle.bundlePath;
         NSDictionary *manifest = [NSDictionary dictionaryWithContentsOfFile:[guestPath stringByAppendingPathComponent:@"LCPluginManifest.plist"]];
-        NSMutableArray<NSString *> *paths = [NSMutableArray new];
+        NSMutableSet<NSString *> *paths = [NSMutableSet new];
         for (NSString *relative in manifest[@"images"]) {
             if (![relative isKindOfClass:NSString.class]) continue;
             NSString *path = [guestPath stringByAppendingPathComponent:relative].stringByStandardizingPath;
-            if ([path hasPrefix:[guestPath stringByAppendingString:@"/"]]) [paths addObject:path.stringByResolvingSymlinksInPath];
+            if ([path hasPrefix:[guestPath stringByAppendingString:@"/"]]) {
+                [paths addObject:@(imagePathWithoutPrivatePrefix(path.fileSystemRepresentation))];
+                [paths addObject:@(imagePathWithoutPrivatePrefix(path.stringByResolvingSymlinksInPath.fileSystemRepresentation))];
+            }
         }
-        hiddenPluginPaths = paths;
+        hiddenPluginPaths = paths.copy;
         Dl_info rebinderInfo = {};
         dladdr(litehook_rebind_symbol, &rebinderInfo);
         rebinderImage = rebinderInfo.dli_fbase;
+    }
+    filterLoadedImages = hideLiveContainer;
+    hostMainHeader = orig_dyld_get_image_header(lcImageIndex);
+    // Registration reports existing images too; future notifications precede their initializers.
+    _dyld_register_func_for_add_image(guestImageAdded);
+    _dyld_register_func_for_remove_image(guestImageRemoved);
+    if (hideLiveContainer) {
         litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, _dyld_image_count, hook_dyld_image_count, shouldFilterImageAPIs);
         litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, _dyld_get_image_header, hook_dyld_get_image_header, shouldFilterImageAPIs);
         litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, _dyld_get_image_vmaddr_slide, hook_dyld_get_image_vmaddr_slide, shouldFilterImageAPIs);
@@ -450,7 +521,7 @@ void DyldHooksInit(bool hideLiveContainer, bool hookDlopen, uint32_t spoofSDKVer
 }
 
 void* getGuestAppHeader(void) {
-    return (void*)orig_dyld_get_image_header(appMainImageIndex);
+    return (void*)guestMainHeader;
 }
 
 uint32_t LCActualDyldImageCount(void) {

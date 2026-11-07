@@ -49,6 +49,19 @@ struct LCPluginPreparation {
               executable == (executable as NSString).lastPathComponent else { throw LCPluginError("主程序文件名无效。") }
         let previous = try manifest(in: bundle)
         let inspection = try LCAppPlugins.inspect(app: app)
+        var removalPaths = paths
+        let compatibilityRuntime = "Frameworks/CydiaSubstrate.framework"
+        if !paths.isEmpty, previous?.injectedFiles.contains(compatibilityRuntime) == true,
+           !paths.contains(compatibilityRuntime) {
+            let runtimeIsNeeded = inspection.images.contains { image in
+                guard image.exists, !image.id.hasPrefix(compatibilityRuntime + "/"),
+                      !paths.contains(where: { image.id == $0 || image.id.hasPrefix($0 + "/") }) else { return false }
+                // Preserve the runtime when a remaining image cannot be inspected safely.
+                guard let dependencies = try? LCPluginMachO(url: contained(image.id, in: bundle)).dependencies else { return true }
+                return dependencies.contains { ["CydiaSubstrate", "libsubstrate.dylib"].contains(($0 as NSString).lastPathComponent) }
+            }
+            if !runtimeIsNeeded { removalPaths.append(compatibilityRuntime) }
+        }
         let workspace = fm.temporaryDirectory.appendingPathComponent("LCPluginImport-\(UUID().uuidString)")
         try fm.createDirectory(at: workspace, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: workspace) }
@@ -84,21 +97,21 @@ struct LCPluginPreparation {
             var injectedFiles = previous?.injectedFiles ?? []
             var images = previous?.images ?? []
             var removedLoads = Set<String>()
-            if !paths.isEmpty {
-                guard paths.allSatisfy({ path in
+            if !removalPaths.isEmpty {
+                guard removalPaths.allSatisfy({ path in
                     previous?.injectedFiles.contains(path) == true || inspection.images.contains { $0.id == path || $0.id.hasPrefix(path + "/") }
                 }) else { throw LCPluginError("所选库不存在，请刷新列表。") }
-                let removed = try paths.map { try contained($0, in: staged) }
-                for reference in inspection.references where paths.contains(where: { reference.target == $0 || reference.target.hasPrefix($0 + "/") }) {
+                let removed = try removalPaths.map { try contained($0, in: staged) }
+                for reference in inspection.references where removalPaths.contains(where: { reference.target == $0 || reference.target.hasPrefix($0 + "/") }) {
                     if reference.loader == executable {
                         removedLoads.insert(reference.load)
-                    } else if !paths.contains(where: { reference.loader == $0 || reference.loader.hasPrefix($0 + "/") }) {
+                    } else if !removalPaths.contains(where: { reference.loader == $0 || reference.loader.hasPrefix($0 + "/") }) {
                         throw LCPluginError("\(reference.loader) 仍依赖 \(reference.target)，请先移除依赖它的插件。")
                     }
                 }
                 for file in removed where fm.fileExists(atPath: file.path) { try fm.removeItem(at: file) }
-                injectedFiles.removeAll { path in paths.contains { path == $0 || path.hasPrefix($0 + "/") } }
-                images.removeAll { image in paths.contains { image == $0 || image.hasPrefix($0 + "/") } }
+                injectedFiles.removeAll { path in removalPaths.contains { path == $0 || path.hasPrefix($0 + "/") } }
+                images.removeAll { image in removalPaths.contains { image == $0 || image.hasPrefix($0 + "/") } }
             }
             let frameworks = staged.appendingPathComponent("Frameworks")
             try fm.createDirectory(at: frameworks, withIntermediateDirectories: true)
@@ -166,8 +179,9 @@ struct LCPluginPreparation {
             try macho.edit(add: loads, remove: removedLoads)
             try macho.write(to: main)
             try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: main.path)
-            guard Set(loads).isSubset(of: Set(try LCPluginMachO(url: main).dependencies)) else {
-                throw LCPluginError("插件注入回读校验失败。")
+            let checkedLoads = Set(try LCPluginMachO(url: main).dependencies)
+            guard Set(loads).isSubset(of: checkedLoads), removedLoads.subtracting(loads).isDisjoint(with: checkedLoads) else {
+                throw LCPluginError("插件加载项修改回读校验失败，原应用未被替换。")
             }
             let manifest = Manifest(revision: 3, executable: executable,
                                     injectedFiles: injectedFiles.sorted(), images: images)
