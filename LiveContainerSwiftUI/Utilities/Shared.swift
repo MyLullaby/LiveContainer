@@ -92,6 +92,44 @@ class SharedModel: ObservableObject {
     var mainWindowOpened = false
     
     public static let keychainAccessGroupCount = 128
+
+    func reloadApps() throws {
+        let fm = FileManager.default
+        let existingApps = apps + hiddenApps
+        var loadedApps: [LCAppModel] = []
+        var directories = [(LCPath.bundlePath, false)]
+        if LCPath.lcGroupDocPath != LCPath.docPath {
+            directories.append((LCPath.lcGroupBundlePath, true))
+        }
+
+        for (directory, isShared) in directories {
+            try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+            for appDir in try fm.contentsOfDirectory(atPath: directory.path) where appDir.hasSuffix(".app") {
+                let path = directory.appendingPathComponent(appDir).path
+                // Keep the model that owns an active launch or signing operation.
+                if let existing = existingApps.first(where: {
+                    $0.appInfo.bundlePath() == path && ($0.isAppRunning || $0.isSigningInProgress)
+                }) {
+                    loadedApps.append(existing)
+                    continue
+                }
+                guard let info = LCAppInfo(bundlePath: path), info.bundleIdentifier() != nil else {
+                    continue
+                }
+                info.relativeBundlePath = appDir
+                info.isShared = isShared
+                loadedApps.append(LCAppModel(appInfo: info))
+            }
+        }
+
+        apps = loadedApps.filter { !$0.uiIsHidden }
+        hiddenApps = loadedApps.filter { $0.uiIsHidden }
+        arm32EmuApps = loadedApps.filter { $0.uiIs32bitEmulator }
+        if multiLCStatus != 2 {
+            let schemes = Set(apps.flatMap { $0.appInfo.urlSchemes() as? [String] ?? [] })
+            UserDefaults.lcShared().set(Array(schemes), forKey: "LCGuestURLSchemes")
+        }
+    }
     
     func updateMultiLCStatus() {
         if LCUtils.appUrlScheme()?.lowercased() != "livecontainer" {

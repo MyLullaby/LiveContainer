@@ -532,7 +532,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, NSSetUncaughtExceptionHandler, hook_do_nothing, nil);
     
     BOOL hookDlopen = !isSideStore && !isSharedBundle && LCSharedUtils.certificatePassword && isLiveProcess;
-    BOOL hideLiveContainer = [guestAppInfo[@"hideLiveContainer"] ?: @YES boolValue];
+    BOOL hideLiveContainer = !isSideStore && [guestAppInfo[@"hideLiveContainer"] ?: @YES boolValue];
     DyldHooksInit(hideLiveContainer, hookDlopen, [guestAppInfo[@"spoofSDKVersion"] unsignedIntValue]);
     
     if([guestContainerInfo[@"spoofIdentifierForVendor"] boolValue]) {

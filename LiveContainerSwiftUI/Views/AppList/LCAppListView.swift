@@ -204,6 +204,9 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
                 }
 
             }
+            .refreshable {
+                await MainActor.run { refreshApps() }
+            }
             .navigationBarProgressBar(show:$installprogressVisible, progress: $installProgressPercentage)
             .coordinateSpace(name: "scroll")
             .onAppear {
@@ -496,6 +499,17 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             app.delegate = self
         }
         didAppear = true
+    }
+
+    func refreshApps() {
+        guard !installprogressVisible else { return }
+        do {
+            try sharedModel.reloadApps()
+            onAppear()
+        } catch {
+            errorInfo = error.localizedDescription
+            errorShow = true
+        }
     }
     
     
