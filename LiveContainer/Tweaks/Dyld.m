@@ -68,21 +68,65 @@ static void overwriteAppExecutableFileType(void) {
     }
 }
 
-static inline int translateImageIndex(int origin) {
-    if(origin == lcImageIndex) {
-        if(!appExecutableFileTypeOverwritten) {
-            overwriteAppExecutableFileType();
-            appExecutableFileTypeOverwritten = true;
+static NSArray<NSString *> *hiddenPluginPaths;
+static const char *guestExecutablePath;
+static bool guestImageLoaded;
+static const mach_header_u *rebinderImage;
+
+static bool shouldFilterImageAPIs(const mach_header_u *header) {
+    // The rebinder must enumerate real images to install hooks on later libraries.
+    return header != rebinderImage;
+}
+
+void LCSetGuestExecutablePath(const char *path) {
+    free((void *)guestExecutablePath);
+    guestExecutablePath = realpath(path, NULL);
+    if (!guestExecutablePath) guestExecutablePath = strdup(path);
+}
+
+static void guestImageAdded(const struct mach_header *header, intptr_t slide) {
+    for (uint32_t i = 0, count = orig_dyld_image_count(); i < count; i++) {
+        const char *path = orig_dyld_get_image_name(i);
+        char resolved[PATH_MAX];
+        if (orig_dyld_get_image_header(i) == header && path &&
+            !strcmp(realpath(path, resolved) ?: path, guestExecutablePath)) {
+            appMainImageIndex = i;
+            guestImageLoaded = true;
+            break;
         }
-        
-        return appMainImageIndex;
     }
-    
-    return origin;
+}
+
+static bool isHiddenImage(uint32_t index) {
+    const char *name = orig_dyld_get_image_name(index);
+    if (!name) return false;
+    if (index == appMainImageIndex && guestImageLoaded) return true;
+    if (index == lcImageIndex) return false;
+    NSString *path = @(name).stringByStandardizingPath.stringByResolvingSymlinksInPath;
+    if ([path hasPrefix:[@(lcMainBundlePath) stringByAppendingString:@"/"]] || strstr(name, "/procursus/")) return true;
+    return [hiddenPluginPaths containsObject:path];
+}
+
+static uint32_t translateImageIndex(uint32_t requested) {
+    uint32_t count = orig_dyld_image_count();
+    for (uint32_t original = 0, visible = 0; original < count; original++) {
+        if (isHiddenImage(original)) continue;
+        if (visible++ != requested) continue;
+        if (original == lcImageIndex && guestImageLoaded) {
+            if (!appExecutableFileTypeOverwritten) {
+                overwriteAppExecutableFileType();
+                appExecutableFileTypeOverwritten = true;
+            }
+            return appMainImageIndex;
+        }
+        return original;
+    }
+    return UINT32_MAX;
 }
 
 void* hook_dlsym(void * __handle, const char * __symbol) {
     if(__handle == (void*)RTLD_MAIN_ONLY) {
+        if (!guestImageLoaded) return orig_dlsym(__handle, __symbol);
         if(strcmp(__symbol, MH_EXECUTE_SYM) == 0) {
             if(!appExecutableFileTypeOverwritten) {
                 overwriteAppExecutableFileType();
@@ -90,7 +134,8 @@ void* hook_dlsym(void * __handle, const char * __symbol) {
             }
             return (void*)orig_dyld_get_image_header(appMainImageIndex);
         }
-        __handle = appExecutableHandle;
+        // Constructors run before dlopen returns the executable handle.
+        __handle = appExecutableHandle ?: RTLD_DEFAULT;
     } else if (__handle != (void*)RTLD_SELF && __handle != (void*)RTLD_NEXT) {
         void* ans = orig_dlsym(__handle, __symbol);
         if(!ans) {
@@ -109,36 +154,26 @@ void* hook_dlsym(void * __handle, const char * __symbol) {
 }
 
 uint32_t hook_dyld_image_count(void) {
-    return orig_dyld_image_count() - 1 - (uint32_t)tweakLoaderLoaded;
+    uint32_t visible = 0;
+    for (uint32_t i = 0, count = orig_dyld_image_count(); i < count; i++) {
+        if (!isHiddenImage(i)) visible++;
+    }
+    return visible;
 }
 
 const struct mach_header* hook_dyld_get_image_header(uint32_t image_index) {
-    __attribute__((musttail)) return orig_dyld_get_image_header(translateImageIndex(image_index));
+    uint32_t original = translateImageIndex(image_index);
+    return original == UINT32_MAX ? NULL : orig_dyld_get_image_header(original);
 }
 
 intptr_t hook_dyld_get_image_vmaddr_slide(uint32_t image_index) {
-    __attribute__((musttail)) return orig_dyld_get_image_vmaddr_slide(translateImageIndex(image_index));
+    uint32_t original = translateImageIndex(image_index);
+    return original == UINT32_MAX ? 0 : orig_dyld_get_image_vmaddr_slide(original);
 }
 
 const char* hook_dyld_get_image_name(uint32_t image_index) {
-    __attribute__((musttail)) return orig_dyld_get_image_name(translateImageIndex(image_index));
-}
-
-void hideLiveContainerImageCallback(const struct mach_header* header, intptr_t vmaddr_slide) {
-    Dl_info info;
-    dladdr(header, &info);
-    if(!strncmp(info.dli_fname, lcMainBundlePath, strlen(lcMainBundlePath)) || strstr(info.dli_fname, "/procursus/") != 0) {
-        char fakePath[PATH_MAX];
-        snprintf(fakePath, sizeof(fakePath), "/usr/lib/%p.dylib", header);
-        kern_return_t ret = vm_protect(mach_task_self(), (vm_address_t)info.dli_fname, PATH_MAX, false, PROT_READ | PROT_WRITE);
-        if(ret != KERN_SUCCESS) {
-            os_thread_self_restrict_tpro_to_rw();
-        }
-        strcpy((char *)info.dli_fname, fakePath);
-        if(ret != KERN_SUCCESS) {
-            os_thread_self_restrict_tpro_to_ro();
-        }
-    }
+    uint32_t original = translateImageIndex(image_index);
+    return original == UINT32_MAX ? NULL : orig_dyld_get_image_name(original);
 }
 
 void* getDSCAddr(void) {
@@ -366,16 +401,31 @@ void DyldHooksInit(bool hideLiveContainer, bool hookDlopen, uint32_t spoofSDKVer
     } else {
         lcMainBundlePath = NSUserDefaults.lcMainBundle.bundlePath.fileSystemRepresentation;
     }
+    lcMainBundlePath = strdup(@(lcMainBundlePath).stringByResolvingSymlinksInPath.fileSystemRepresentation);
     orig_dyld_get_image_header = _dyld_get_image_header;
+    LCSetGuestExecutablePath(NSBundle.mainBundle.executablePath.fileSystemRepresentation);
+    _dyld_register_func_for_add_image(guestImageAdded);
     
     // hook dlsym to solve RTLD_MAIN_ONLY, hook other functions to hide LiveContainer itself
     litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, dlsym, hook_dlsym, nil);
     if(hideLiveContainer) {
-        litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, _dyld_image_count, hook_dyld_image_count, nil);
-        litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, _dyld_get_image_header, hook_dyld_get_image_header, nil);
-        litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, _dyld_get_image_vmaddr_slide, hook_dyld_get_image_vmaddr_slide, nil);
-        litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, _dyld_get_image_name, hook_dyld_get_image_name, nil);
-        _dyld_register_func_for_add_image((void (*)(const struct mach_header *, intptr_t))hideLiveContainerImageCallback);
+        // Keep real paths intact: Bundle/Core Data and dependency resolution need them.
+        NSString *guestPath = NSBundle.mainBundle.bundlePath;
+        NSDictionary *manifest = [NSDictionary dictionaryWithContentsOfFile:[guestPath stringByAppendingPathComponent:@"LCPluginManifest.plist"]];
+        NSMutableArray<NSString *> *paths = [NSMutableArray new];
+        for (NSString *relative in manifest[@"images"]) {
+            if (![relative isKindOfClass:NSString.class]) continue;
+            NSString *path = [guestPath stringByAppendingPathComponent:relative].stringByStandardizingPath;
+            if ([path hasPrefix:[guestPath stringByAppendingString:@"/"]]) [paths addObject:path.stringByResolvingSymlinksInPath];
+        }
+        hiddenPluginPaths = paths;
+        Dl_info rebinderInfo = {};
+        dladdr(litehook_rebind_symbol, &rebinderInfo);
+        rebinderImage = rebinderInfo.dli_fbase;
+        litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, _dyld_image_count, hook_dyld_image_count, shouldFilterImageAPIs);
+        litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, _dyld_get_image_header, hook_dyld_get_image_header, shouldFilterImageAPIs);
+        litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, _dyld_get_image_vmaddr_slide, hook_dyld_get_image_vmaddr_slide, shouldFilterImageAPIs);
+        litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, _dyld_get_image_name, hook_dyld_get_image_name, shouldFilterImageAPIs);
     }
     
     appExecutableFileTypeOverwritten = !hideLiveContainer;
@@ -401,6 +451,10 @@ void DyldHooksInit(bool hideLiveContainer, bool hookDlopen, uint32_t spoofSDKVer
 
 void* getGuestAppHeader(void) {
     return (void*)orig_dyld_get_image_header(appMainImageIndex);
+}
+
+uint32_t LCActualDyldImageCount(void) {
+    return orig_dyld_image_count();
 }
 
 #pragma mark - Fix black screen

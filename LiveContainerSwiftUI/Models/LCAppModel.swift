@@ -415,6 +415,40 @@ class LCAppModel: ObservableObject, Hashable {
     }
     
     func signApp(force: Bool = false) async throws {
+        if !(appInfo is BuiltInSideStoreAppInfo), let staged = try LCPluginPreparation.stage(app: appInfo) {
+            defer { try? FileManager.default.removeItem(at: staged) }
+            for container in appInfo.containers {
+                if LCSharedUtils.getContainerUsingLCScheme(withFolderName: container.folderName) != nil {
+                    throw LCPluginError("应用正在其他容器中运行，请退出后再更新插件。")
+                }
+            }
+            guard let stagedInfo = LCAppInfo(bundlePath: staged.path) else {
+                throw LCPluginError("无法读取插件处理后的应用。")
+            }
+            stagedInfo.info()["LCPatchRevision"] = -1
+            stagedInfo.save()
+            try await signApp(stagedInfo, force: true)
+            let bundle = URL(fileURLWithPath: appInfo.bundlePath())
+            try LCPluginPreparation.commit(staged: staged, to: bundle)
+            guard let updatedInfo = LCAppInfo(bundlePath: bundle.path) else {
+                throw LCPluginError("无法读取插件处理后的应用。")
+            }
+            updatedInfo.relativeBundlePath = appInfo.relativeBundlePath
+            updatedInfo.isShared = appInfo.isShared
+            appInfo = updatedInfo
+        } else {
+            try await signApp(appInfo, force: force)
+        }
+
+        guard !appInfo.dontInjectTweakLoader || !appInfo.dontLoadTweakLoader else { return }
+        let root = appInfo.isShared ? LCPath.lcGroupTweakPath : LCPath.tweakPath
+        if let tweakFolder = appInfo.tweakFolder {
+            try await LCUtils.signTweaks(tweakFolderUrl: root.appendingPathComponent(tweakFolder), force: force)
+        }
+        try await LCUtils.signTweaks(tweakFolderUrl: root, force: force)
+    }
+
+    private func signApp(_ info: LCAppInfo, force: Bool) async throws {
         var signError : String? = nil
         var signSuccess = false
         defer {
@@ -424,7 +458,7 @@ class LCAppModel: ObservableObject, Hashable {
         }
         
         await withUnsafeContinuation({ c in
-            appInfo.patchExecAndSignIfNeed(completionHandler: { success, error in
+            info.patchExecAndSignIfNeed(completionHandler: { success, error in
                 signError = error;
                 signSuccess = success;
                 c.resume()
@@ -440,34 +474,8 @@ class LCAppModel: ObservableObject, Hashable {
                 }
             }, forceSign: force)
         })
-        if let signError {
-            if !signSuccess {
-                throw signError.loc
-            }
-        }
-        
-        // sign its tweak
-        guard let tweakFolder = appInfo.tweakFolder else {
-            return
-        }
-        
-        let tweakFolderUrl : URL
-        if(appInfo.isShared) {
-            tweakFolderUrl = LCPath.lcGroupTweakPath.appendingPathComponent(tweakFolder)
-        } else {
-            tweakFolderUrl = LCPath.tweakPath.appendingPathComponent(tweakFolder)
-        }
-        try await LCUtils.signTweaks(tweakFolderUrl: tweakFolderUrl, force: force) { p in
-            Task{ await MainActor.run {
-                self.isSigningInProgress = true
-            }}
-        }
-        
-        // sign global tweak
-        try await LCUtils.signTweaks(tweakFolderUrl: LCPath.tweakPath, force: force) { p in
-            Task{ await MainActor.run {
-                self.isSigningInProgress = true
-            }}
+        if !signSuccess {
+            throw signError?.loc ?? "应用签名失败，未返回错误详情。"
         }
     }
 

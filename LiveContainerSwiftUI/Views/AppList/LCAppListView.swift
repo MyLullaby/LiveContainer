@@ -697,50 +697,27 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             }
             appRelativePath = installOptionChosen.nameOfFolderToInstall
             appToReplace = installOptionChosen.appToReplace
-            if installOptionChosen.isReplace {
-                try fm.removeItem(at: outputFolder)
+        }
+        if let appToReplace {
+            for container in appToReplace.appInfo.containers {
+                if LCSharedUtils.getContainerUsingLCScheme(withFolderName: container.folderName) != nil {
+                    throw LCPluginError("应用仍在运行，请退出后再覆盖安装。")
+                }
             }
         }
-        // Move it!
-        try fm.moveItem(at: appFolderPath, to: outputFolder)
-        let finalNewApp = LCAppInfo(bundlePath: outputFolder.path)
-        finalNewApp?.relativeBundlePath = appRelativePath
-        
-        guard let finalNewApp else {
-            errorInfo = "lc.appList.appInfoInitError".loc
-            errorShow = true
-            return
+        try fm.createDirectory(at: outputFolder.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let installation = outputFolder.deletingLastPathComponent().appendingPathComponent(".LCInstall-\(UUID().uuidString)")
+        try fm.createDirectory(at: installation, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: installation) }
+        let stagedApp = installation.appendingPathComponent("Guest.app")
+        try fm.moveItem(at: appFolderPath, to: stagedApp)
+        guard var finalNewApp = LCAppInfo(bundlePath: stagedApp.path) else {
+            throw "lc.appList.appInfoInitError".loc
         }
 
         // Apply the preference before signing, but keep restoration records specific to the new binary.
         if let appToReplace {
             finalNewApp.fixCommonSectionAlignment = appToReplace.appInfo.fixCommonSectionAlignment
-        }
-        
-        // patch and sign it
-        var signError : String? = nil
-        var signSuccess = false
-        await withUnsafeContinuation({ c in
-            if appToReplace?.uiDontSign ?? false || LCUtils.appGroupUserDefault.bool(forKey: "LCDontSignApp") {
-                finalNewApp.dontSign = true
-            }
-            finalNewApp.patchExecAndSignIfNeed(completionHandler: { success, error in
-                signError = error
-                signSuccess = success
-                c.resume()
-            }, progressHandler: { signProgress in
-                installProgress.addChild(signProgress!, withPendingUnitCount: 20)
-            }, forceSign: false)
-        })
-        
-        // we leave it unsigned even if signing failed
-        if let signError {
-            if signSuccess {
-                errorInfo = "\("lc.appList.signSuccessWithError".loc)\n\n\(signError)"
-            } else {
-                errorInfo = signError.loc
-            }
-            errorShow = true
         }
         
         if let appToReplace {
@@ -775,6 +752,24 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
             finalNewApp.spoofSDKVersion = true
         }
         finalNewApp.installationDate = Date.now
+        finalNewApp.relativeBundlePath = appRelativePath
+        if appToReplace?.uiDontSign ?? false || LCUtils.appGroupUserDefault.bool(forKey: "LCDontSignApp") {
+            finalNewApp.dontSign = true
+        }
+        let installingModel = LCAppModel(appInfo: finalNewApp)
+        let progressSubscription = installingModel.$signProgress.sink { value in
+            DispatchQueue.main.async { self.installProgressPercentage = 0.8 + Float(value) * 0.2 }
+        }
+        defer { progressSubscription.cancel() }
+        try await installingModel.signApp()
+        finalNewApp = installingModel.appInfo
+        if appToReplace != nil {
+            try LCPluginPreparation.commit(staged: stagedApp, to: outputFolder)
+        } else {
+            try fm.moveItem(at: stagedApp, to: outputFolder)
+        }
+        finalNewApp.setBundlePath(outputFolder.path)
+
         
         DispatchQueue.main.async {
             if let appToReplace {

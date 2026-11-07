@@ -26,6 +26,7 @@ uint32_t dyld_get_sdk_version(const struct mach_header* mh);
 
 @interface LCUtils : NSObject
 
++ (BOOL)extractPluginArchive:(NSString *)path toPath:(NSString *)destination error:(NSError **)error;
 + (void)validateJITLessSetupWithCompletionHandler:(void (^)(BOOL success, NSError *error))completionHandler;
 + (NSURL *)archiveIPAWithBundleName:(NSString*)newBundleName includingExtraInfoDict:(NSDictionary *)extraInfoDict error:(NSError **)error;
 + (NSData *)certificateData;

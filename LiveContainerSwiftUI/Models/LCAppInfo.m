@@ -66,6 +66,9 @@
         }
 
         _autoSaveDisabled = false;
+        // Save these defaults with the next app update; bootstrap uses the same defaults.
+        if (!_info[@"dontInjectTweakLoader"]) _info[@"dontInjectTweakLoader"] = @YES;
+        if (!_info[@"dontLoadTweakLoader"]) _info[@"dontLoadTweakLoader"] = @YES;
     }
     return self;
 }

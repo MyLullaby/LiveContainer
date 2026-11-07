@@ -573,7 +573,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
         appExecPath = strdup(selected32bitLayerBundle.executablePath.UTF8String);
         overwriteExecPath(appExecPath);
     }
-    if(![guestAppInfo[@"dontInjectTweakLoader"] boolValue]) {
+    if(![guestAppInfo[@"dontInjectTweakLoader"] ?: @YES boolValue]) {
         tweakLoaderLoaded = true;
     }
     
@@ -581,7 +581,8 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     IMP threadInitializer = class_getMethodImplementation(object_getClass(threadClass), @selector(initialize));
 
     // Preload executable to bypass RT_NOLOAD
-    appMainImageIndex = _dyld_image_count();
+    LCSetGuestExecutablePath(appExecPath);
+    appMainImageIndex = LCActualDyldImageCount();
     __block void *appHandle = 0;
     void (^dlopenBlock)(void) = ^{
         appHandle = dlopen_nolock(appExecPath, RTLD_LAZY|RTLD_GLOBAL|RTLD_FIRST);
@@ -609,7 +610,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
         return appError;
     }
     
-    if([guestAppInfo[@"dontInjectTweakLoader"] boolValue] && ![guestAppInfo[@"dontLoadTweakLoader"] boolValue]) {
+    if([guestAppInfo[@"dontInjectTweakLoader"] ?: @YES boolValue] && ![guestAppInfo[@"dontLoadTweakLoader"] ?: @YES boolValue]) {
         tweakLoaderLoaded = true;
         if(hideLiveContainer) {
             dlopen([lcMainBundle.bundlePath stringByAppendingPathComponent:@"Frameworks/TweakLoader.dylib"].UTF8String, RTLD_LAZY|RTLD_GLOBAL);
@@ -624,7 +625,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     }
     
     if(sideStoreExist) {
-        if (!isLiveProcess && (isSideStore || ![guestAppInfo[@"dontInjectTweakLoader"] boolValue])) {
+        if (!isLiveProcess && (isSideStore || ![guestAppInfo[@"dontInjectTweakLoader"] ?: @YES boolValue])) {
             dlopen([lcMainBundle.bundlePath stringByAppendingPathComponent:@"Frameworks/SideStoreSupport.framework/SideStoreSupport"].UTF8String, RTLD_LAZY);
         } else if (isLiveProcess && isSideStore) {
             dlopen([lcMainBundle.bundlePath stringByAppendingPathComponent:@"../../Frameworks/SideStoreSupport.framework/SideStoreSupport"].UTF8String, RTLD_LAZY);

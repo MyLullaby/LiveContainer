@@ -109,3 +109,97 @@ int extract(NSString* fileToExtract, NSString* extractionPath, NSProgress* progr
     
     return 0;
 }
+
+#import "LCUtils.h"
+
+static BOOL extractPluginData(struct archive *reader, NSString *destination, BOOL deb, NSError **error) {
+    struct archive_entry *entry;
+    uint64_t total = 0;
+    NSUInteger count = 0;
+    BOOL foundPayload = NO;
+    int status;
+    while ((status = archive_read_next_header(reader, &entry)) == ARCHIVE_OK) {
+        const char *raw = archive_entry_pathname(entry);
+        NSString *name = raw ? [NSString stringWithUTF8String:raw] : nil;
+        la_int64_t size = archive_entry_size(entry);
+        if (!name || size < 0 || size > 512 * 1024 * 1024 || ++count > 200000) break;
+        total += size;
+        if (total > 1024ULL * 1024 * 1024) break;
+        if (deb) {
+            if (![name isEqualToString:@"data.tar"] && ![name hasPrefix:@"data.tar."]) continue;
+            if (foundPayload) break;
+            foundPayload = YES;
+            NSMutableData *data = [NSMutableData dataWithLength:(NSUInteger)size];
+            NSUInteger offset = 0;
+            while (offset < data.length) {
+                la_ssize_t read = archive_read_data(reader, (char *)data.mutableBytes + offset, data.length - offset);
+                if (read <= 0) break;
+                offset += read;
+            }
+            if (offset != data.length) break;
+            struct archive *payload = archive_read_new();
+            archive_read_support_format_tar(payload);
+            archive_read_support_filter_all(payload);
+            BOOL success = archive_read_open_memory(payload, data.bytes, data.length) == ARCHIVE_OK
+                && extractPluginData(payload, destination, NO, error);
+            archive_read_free(payload);
+            if (!success) return NO;
+            continue;
+        }
+        mode_t type = archive_entry_filetype(entry);
+        if (archive_entry_symlink(entry) || archive_entry_hardlink(entry)) continue;
+        if (type != AE_IFREG && type != AE_IFDIR) continue;
+        NSString *path = [destination stringByAppendingPathComponent:name].stringByStandardizingPath;
+        if ([name hasPrefix:@"/"] || ![path hasPrefix:[destination stringByAppendingString:@"/"]]) {
+            if ([path isEqualToString:destination] && type == AE_IFDIR) continue;
+            break;
+        }
+        NSFileManager *fm = NSFileManager.defaultManager;
+        if (type == AE_IFDIR) {
+            if (![fm createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:error]) return NO;
+            continue;
+        }
+        if ([fm fileExistsAtPath:path]) break;
+        if (![fm createDirectoryAtPath:path.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:error]) return NO;
+        NSMutableData *data = [NSMutableData dataWithLength:(NSUInteger)size];
+        NSUInteger offset = 0;
+        while (offset < data.length) {
+            la_ssize_t read = archive_read_data(reader, (char *)data.mutableBytes + offset, data.length - offset);
+            if (read <= 0) break;
+            offset += read;
+        }
+        if (offset != data.length) break;
+        if (![data writeToFile:path options:NSDataWritingAtomic error:error]) return NO;
+    }
+    if (status == ARCHIVE_EOF && (!deb || foundPayload)) return YES;
+    if (error && !*error) {
+        const char *detail = archive_error_string(reader);
+        *error = [NSError errorWithDomain:@"LCPluginImport" code:1 userInfo:@{
+            NSLocalizedDescriptionKey: detail ? @(detail) : @"插件包损坏、路径无效、超过解压限制或缺少 data.tar。"
+        }];
+    }
+    return NO;
+}
+
+@implementation LCUtils (PluginImport)
++ (BOOL)extractPluginArchive:(NSString *)path toPath:(NSString *)destination error:(NSError **)error {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *staged = [destination.stringByDeletingLastPathComponent stringByAppendingPathComponent:[@".LCPluginImport-" stringByAppendingString:NSUUID.UUID.UUIDString]];
+    if (![fm createDirectoryAtPath:staged withIntermediateDirectories:YES attributes:nil error:error]) return NO;
+    struct archive *reader = archive_read_new();
+    BOOL deb = [path.pathExtension.lowercaseString isEqualToString:@"deb"];
+    if (deb) archive_read_support_format_ar(reader);
+    else archive_read_support_format_zip(reader);
+    archive_read_support_filter_all(reader);
+    BOOL success = archive_read_open_filename(reader, path.fileSystemRepresentation, 10240) == ARCHIVE_OK
+        && extractPluginData(reader, staged, deb, error);
+    if (!success && error && !*error) {
+        const char *detail = archive_error_string(reader);
+        *error = [NSError errorWithDomain:@"LCPluginImport" code:2 userInfo:@{NSLocalizedDescriptionKey: detail ? @(detail) : @"无法解压插件包。"}];
+    }
+    archive_read_free(reader);
+    if (success) success = [fm moveItemAtPath:staged toPath:destination error:error];
+    [fm removeItemAtPath:staged error:nil];
+    return success;
+}
+@end
