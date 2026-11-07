@@ -9,6 +9,63 @@ import LocalAuthentication
 
 extension LCUtils {
     public static let appGroupUserDefault = UserDefaults.init(suiteName: LCSharedUtils.appGroupID()) ?? UserDefaults.standard
+
+    static func exportGuestIPA(bundleURL: URL) throws -> URL {
+        let fm = FileManager.default
+        let source = bundleURL.resolvingSymlinksInPath()
+        let infoURL = source.appendingPathComponent("Info.plist")
+        let info = try PropertyListSerialization.propertyList(from: Data(contentsOf: infoURL), format: nil) as? [String: Any]
+        guard let executable = info?["CFBundleExecutable"] as? String, !executable.isEmpty,
+              executable == (executable as NSString).lastPathComponent else {
+            throw LCPluginError("应用缺少有效的主程序，无法导出 IPA。")
+        }
+        let workspace = fm.temporaryDirectory.appendingPathComponent("LCExport-\(UUID().uuidString)")
+        try fm.createDirectory(at: workspace, withIntermediateDirectories: true)
+        do {
+            let archiveRoot = workspace.appendingPathComponent("Archive")
+            let payload = archiveRoot.appendingPathComponent("Payload")
+            try fm.createDirectory(at: payload, withIntermediateDirectories: true)
+            let app = payload.appendingPathComponent("App.app")
+            try fm.copyItem(at: source, to: app)
+            // Export executable content only; never include container references or import sources.
+            for name in ["LCAppInfo.plist", "LCContainerInfo.plist", "LCThreadInitialization.plist", "LCPluginLaunch.plist",
+                         "LCAppIconDark.png", "LCAppIconLight.png", ".LCPlugins", ".LCPluginPreparation",
+                         executable + "_LiveContainerPatchBackUp"] {
+                let file = app.appendingPathComponent(name)
+                if fm.fileExists(atPath: file.path) { try fm.removeItem(at: file) }
+            }
+            // A symlink into an external data directory must not bring user data into the archive.
+            if let entries = fm.enumerator(at: app, includingPropertiesForKeys: [.isSymbolicLinkKey]) {
+                let root = app.resolvingSymlinksInPath().path + "/"
+                for case let file as URL in entries {
+                    if try file.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true,
+                       !file.resolvingSymlinksInPath().path.hasPrefix(root) {
+                        throw LCPluginError("应用包含指向包外的链接，无法安全导出：\(file.lastPathComponent)")
+                    }
+                }
+            }
+            let title = (info?["CFBundleDisplayName"] as? String) ?? (info?["CFBundleName"] as? String) ?? "App"
+            let filename = title.components(separatedBy: CharacterSet(charactersIn: "/\\:").union(.controlCharacters)).joined(separator: "_")
+            let output = workspace.appendingPathComponent((filename.isEmpty ? "App" : String(filename.prefix(100))) + ".ipa")
+            var coordinationError: NSError?
+            var archiveError: Error?
+            var written = false
+            NSFileCoordinator().coordinate(readingItemAt: payload, options: .forUploading, error: &coordinationError) { archive in
+                do {
+                    try fm.copyItem(at: archive, to: output)
+                    written = true
+                } catch { archiveError = error }
+            }
+            if let coordinationError { throw coordinationError }
+            if let archiveError { throw archiveError }
+            guard written else { throw LCPluginError("IPA 打包失败。") }
+            try fm.removeItem(at: archiveRoot)
+            return output
+        } catch {
+            try? fm.removeItem(at: workspace)
+            throw error
+        }
+    }
     
     public static func signTweaks(tweakFolderUrl: URL, force : Bool = false, progressHandler : ((Progress) -> Void)? = nil) async throws {
         guard LCSharedUtils.certificatePassword() != nil else {

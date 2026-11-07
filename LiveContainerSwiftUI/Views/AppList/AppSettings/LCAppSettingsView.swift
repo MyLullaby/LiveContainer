@@ -38,6 +38,9 @@ struct LCAppSettingsView: View {
     @State private var errorInfo = ""
     @State private var selectUnusedContainerSheetShow = false
     @State private var threadInitializationDiagnostics: [AnyHashable: Any] = [:]
+    @State private var exportingIPA = false
+    @State private var exportedIPA: URL?
+    @State private var showingIPAShare = false
     @Environment(\.scenePhase) private var scenePhase
     
     @EnvironmentObject private var sharedModel : SharedModel
@@ -51,6 +54,13 @@ struct LCAppSettingsView: View {
             if !(model.appInfo is BuiltInSideStoreAppInfo) {
                 Section {
                     NavigationLink("应用插件") { LCAppPluginsView(model: model) }
+                    Button("分享 IPA", systemImage: "square.and.arrow.up") {
+                        Task { await shareIPA() }
+                    }
+                    .disabled(model.isAppRunning || model.isSigningInProgress || exportingIPA)
+                    if exportingIPA { ProgressView("正在打包 IPA…") }
+                } footer: {
+                    Text("包含当前应用和已注入的插件，不包含应用数据。")
                 }
             }
             Section {
@@ -450,6 +460,13 @@ struct LCAppSettingsView: View {
         }
         .navigationTitle(appInfo.displayName())
         .navigationBarTitleDisplayMode(.inline)
+        .disabled(exportingIPA)
+        .sheet(isPresented: $showingIPAShare, onDismiss: {
+            if let exportedIPA { try? FileManager.default.removeItem(at: exportedIPA.deletingLastPathComponent()) }
+            exportedIPA = nil
+        }) {
+            if let exportedIPA { ActivityViewController(activityItems: [exportedIPA]) }
+        }
         .onAppear {
             threadInitializationDiagnostics = appInfo.threadInitializationDiagnostics ?? [:]
         }
@@ -530,6 +547,28 @@ struct LCAppSettingsView: View {
         }
         .fileImporter(isPresented: $choosingStorage, allowedContentTypes: [.folder]) { result in
             Task { await importDataStorage(result: result) }
+        }
+    }
+
+    @MainActor private func shareIPA() async {
+        guard !exportingIPA, !model.isAppRunning, !model.isSigningInProgress else { return }
+        exportingIPA = true
+        model.isAppRunning = true
+        defer { exportingIPA = false; model.isAppRunning = false }
+        do {
+            for container in appInfo.containers {
+                if LCSharedUtils.getContainerUsingLCScheme(withFolderName: container.folderName) != nil {
+                    throw LCPluginError("请先退出正在运行的应用，再导出 IPA。")
+                }
+            }
+            let source = URL(fileURLWithPath: appInfo.bundlePath())
+            exportedIPA = try await Task.detached(priority: .userInitiated) {
+                try LCUtils.exportGuestIPA(bundleURL: source)
+            }.value
+            showingIPAShare = true
+        } catch {
+            errorInfo = error.localizedDescription
+            errorShow = true
         }
     }
 

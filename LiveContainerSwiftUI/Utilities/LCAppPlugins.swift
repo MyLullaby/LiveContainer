@@ -6,6 +6,7 @@ enum LCAppPlugins {
         let managed: Bool
         let linked: Bool
         let exists: Bool
+        let isPlugin: Bool
     }
 
     struct Inspection {
@@ -19,8 +20,10 @@ enum LCAppPlugins {
         let target: String
     }
     static let extensions: Set<String> = ["dylib", "deb", "zip"]
+    static let classificationKey = "LCPluginClassifications"
+    static let visibilityFile = "LCPluginVisibility.plist"
 
-    static func inspect(app: LCAppInfo) throws -> Inspection {
+    static func inspect(app: LCAppInfo, classifications draft: [String: Bool]? = nil) throws -> Inspection {
         let fm = FileManager.default
         let bundle = URL(fileURLWithPath: app.bundlePath()).resolvingSymlinksInPath()
         let manifest = try LCPluginPreparation.manifest(in: bundle)
@@ -52,6 +55,7 @@ enum LCAppPlugins {
         var visited = Set<URL>()
         var linked = Set<URL>()
         var references: [Reference] = []
+        var dependencies: [URL: [String]] = [:]
         while !queue.isEmpty {
             let (image, inheritedPaths) = queue.removeLast()
             guard visited.insert(image).inserted else { continue }
@@ -60,6 +64,7 @@ enum LCAppPlugins {
             do {
                 let macho = try LCPluginMachO(url: image)
                 loads = try macho.dependencies
+                dependencies[image] = loads
                 paths = try macho.runtimeSearchPaths.sorted().compactMap { expand($0 + "/", loader: image.deletingLastPathComponent()) } + inheritedPaths
             } catch {
                 warnings.append(error.localizedDescription)
@@ -87,11 +92,49 @@ enum LCAppPlugins {
         }
         let managed = Set((manifest?.images ?? []).map { bundle.appendingPathComponent($0).standardizedFileURL.resolvingSymlinksInPath() })
         files.formUnion(managed)
+        let classifications = try draft ?? savedClassifications(app: app)
+        let hookRuntimes: Set<String> = ["cydiasubstrate", "libsubstrate.dylib", "libhooker.dylib", "libellekit.dylib", "ellekit", "libsubstitute.dylib"]
+        // shortcut: hook-runtime dependencies identify common injected plugins; other libraries need user classification without an original IPA.
+        var detected = Set<URL>()
+        for file in files where file != main && file.path.hasPrefix(bundle.path + "/") {
+            let loads: [String]
+            if let known = dependencies[file] { loads = known }
+            else {
+                do { loads = try LCPluginMachO(url: file).dependencies }
+                catch { warnings.append(error.localizedDescription); continue }
+            }
+            if hookRuntimes.contains(file.lastPathComponent.lowercased()) || loads.contains(where: { hookRuntimes.contains(($0 as NSString).lastPathComponent.lowercased()) }) {
+                detected.insert(file)
+            }
+        }
         let images = files.filter { $0 != main && $0.path.hasPrefix(bundle.path + "/") }.map { file in
-            Image(id: String(file.path.dropFirst(bundle.path.count + 1)), managed: managed.contains(file),
-                  linked: linked.contains(file), exists: fm.fileExists(atPath: file.path))
+            let relative = String(file.path.dropFirst(bundle.path.count + 1))
+            return Image(id: relative, managed: managed.contains(file),
+                         linked: linked.contains(file), exists: fm.fileExists(atPath: file.path),
+                         isPlugin: managed.contains(file) || (classifications[relative] ?? detected.contains(file)))
         }.sorted { $0.id.localizedStandardCompare($1.id) == .orderedAscending }
         return Inspection(images: images, warnings: Array(Set(warnings)).sorted(), references: references)
+    }
+
+    static func savedClassifications(app: LCAppInfo) throws -> [String: Bool] {
+        let url = URL(fileURLWithPath: app.bundlePath()).appendingPathComponent(visibilityFile)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return app.info()[classificationKey] as? [String: Bool] ?? [:]
+        }
+        guard let saved = try PropertyListSerialization.propertyList(from: Data(contentsOf: url), format: nil) as? [String: Any],
+              let classifications = saved["classifications"] as? [String: Bool] else {
+            throw LCPluginError("插件隐藏设置损坏，无法读取分类。")
+        }
+        return classifications
+    }
+
+    static func confirmVisibility(app: LCAppInfo, classifications: [String: Bool]) throws -> Int {
+        let inspection = try inspect(app: app, classifications: classifications)
+        let images = inspection.images.filter { $0.isPlugin && $0.exists }.map(\.id)
+        let saved: [String: Any] = ["images": images, "classifications": classifications]
+        let url = URL(fileURLWithPath: app.bundlePath()).appendingPathComponent(visibilityFile)
+        try PropertyListSerialization.data(fromPropertyList: saved, format: .binary, options: 0).write(to: url, options: .atomic)
+        return images.count
     }
 
 }

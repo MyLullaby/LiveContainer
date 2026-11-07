@@ -473,13 +473,21 @@ void DyldHooksInit(bool hideLiveContainer, bool hookDlopen, uint32_t spoofSDKVer
         // Keep real paths intact: Bundle/Core Data and dependency resolution need them.
         NSString *guestPath = NSBundle.mainBundle.bundlePath;
         NSDictionary *manifest = [NSDictionary dictionaryWithContentsOfFile:[guestPath stringByAppendingPathComponent:@"LCPluginManifest.plist"]];
+        NSDictionary *visibility = [NSDictionary dictionaryWithContentsOfFile:[guestPath stringByAppendingPathComponent:@"LCPluginVisibility.plist"]];
         NSMutableSet<NSString *> *paths = [NSMutableSet new];
-        for (NSString *relative in manifest[@"images"]) {
-            if (![relative isKindOfClass:NSString.class]) continue;
-            NSString *path = [guestPath stringByAppendingPathComponent:relative].stringByStandardizingPath;
-            if ([path hasPrefix:[guestPath stringByAppendingString:@"/"]]) {
-                [paths addObject:@(imagePathWithoutPrivatePrefix(path.fileSystemRepresentation))];
-                [paths addObject:@(imagePathWithoutPrivatePrefix(path.stringByResolvingSymlinksInPath.fileSystemRepresentation))];
+        NSString *resolvedRoot = [guestPath.stringByResolvingSymlinksInPath stringByAppendingString:@"/"];
+        // Confirmed external plugins join LC imports without changing their loading or ownership.
+        for (id images in @[manifest[@"images"] ?: @[], visibility[@"images"] ?: @[]]) {
+            if (![images isKindOfClass:NSArray.class]) continue;
+            for (NSString *relative in images) {
+                if (![relative isKindOfClass:NSString.class] || relative.isAbsolutePath) continue;
+                NSString *path = [guestPath stringByAppendingPathComponent:relative].stringByStandardizingPath;
+                NSString *resolved = path.stringByResolvingSymlinksInPath;
+                if ([path hasPrefix:[guestPath stringByAppendingString:@"/"]] && [resolved hasPrefix:resolvedRoot] &&
+                    ![resolved isEqualToString:NSBundle.mainBundle.executablePath.stringByResolvingSymlinksInPath]) {
+                    [paths addObject:@(imagePathWithoutPrivatePrefix(path.fileSystemRepresentation))];
+                    [paths addObject:@(imagePathWithoutPrivatePrefix(resolved.fileSystemRepresentation))];
+                }
             }
         }
         hiddenPluginPaths = paths.copy;

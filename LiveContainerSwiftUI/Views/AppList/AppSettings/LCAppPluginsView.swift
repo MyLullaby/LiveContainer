@@ -10,6 +10,8 @@ struct LCAppPluginsView: View {
     @State private var removal: [String] = []
     @State private var confirmingRemoval = false
     @State private var launchDiagnostic: [String: Any] = [:]
+    @State private var classifications: [String: Bool] = [:]
+    @State private var classificationChanged = false
 
     var body: some View {
         List {
@@ -26,43 +28,38 @@ struct LCAppPluginsView: View {
             }
             if let inspection {
                 Section {
-                    Text("LC 管理的库：\(inspection.images.filter { $0.managed && $0.exists }.count) 个")
-                    Text("IPA 内其他库：\(inspection.images.filter { !$0.managed && $0.exists }.count) 个")
-                    ForEach(inspection.images.filter(\.exists)) { image in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text(image.id).font(.footnote).textSelection(.enabled)
-                                Spacer()
-                                Button(role: .destructive) {
-                                    removal = [removalPath(image.id)]
-                                    confirmingRemoval = true
-                                } label: { Image(systemName: "trash") }
-                                    .buttonStyle(.borderless).accessibilityLabel("移除 \(image.id)")
-                            }
-                            Text("\(image.managed ? "LC 导入" : "IPA 内置／其他工具导入") · \(image.linked ? "在静态加载链中" : "文件存在")")
-                                .font(.caption).foregroundColor(.secondary)
+                    Text("第三方插件：\(inspection.images.filter { $0.isPlugin && $0.exists }.count) 个")
+                    ForEach(inspection.images.filter { $0.isPlugin && $0.exists }) { image in
+                        libraryRow(image)
+                    }
+                    DisclosureGroup("其他库（\(inspection.images.filter { !$0.isPlugin && $0.exists }.count)）") {
+                        ForEach(inspection.images.filter { !$0.isPlugin && $0.exists }) { image in
+                            libraryRow(image)
                         }
                     }
                     ForEach(inspection.warnings, id: \.self) { warning in
                         Text(warning).font(.footnote).foregroundColor(.orange).textSelection(.enabled)
                     }
-                } header: { Text("实际库检测") } footer: {
-                    Text("列表来自 App 内实际存在的库。其他库包含应用自带依赖及其他工具注入的库，请勿随意移除。静态加载链不代表插件运行成功。")
+                } header: { Text("插件管理") } footer: {
+                    Text("包含 LC 导入和根据注入特征识别的插件。未识别的插件可在“其他库”中纳入管理；长按已识别项可标记为应用原有库。调整后点击“确认并隐藏插件”，下次启动生效；分类不会改变加载方式。")
                 }
             }
             Section {
+                Button(classificationChanged ? "确认并隐藏插件（有未保存修改）" : "确认并隐藏插件", systemImage: "checkmark.shield") { confirmVisibility() }
+                    .disabled(inspection == nil)
                 Button("导入插件", systemImage: "square.and.arrow.down") { choosingFiles = true }
                 Button("刷新列表", systemImage: "arrow.clockwise") { reload() }
-                Button("移除全部 LC 导入内容", role: .destructive) {
+                Button("移除全部插件", role: .destructive) {
                     do {
                         let bundle = URL(fileURLWithPath: model.appInfo.bundlePath())
-                        removal = try LCPluginPreparation.manifest(in: bundle)?.injectedFiles ?? []
-                        if removal.isEmpty { message = "没有可移除的 LC 导入内容。" }
+                        let resources = try LCPluginPreparation.manifest(in: bundle)?.injectedFiles ?? []
+                        removal = Array(Set(resources + (inspection?.images.filter { $0.isPlugin && $0.exists }.map { removalPath($0.id) } ?? []))).sorted()
+                        if removal.isEmpty { message = "没有可移除的插件。" }
                         else { confirmingRemoval = true }
                     } catch { message = error.localizedDescription }
                 }
             } footer: {
-                Text("支持 dylib、deb、zip。导入后立即修改并签名，成功后才更新列表；同名库直接覆盖。无需保留来源文件，重新修改请再次导入。移除全部仅处理 LC 记录的内容，保留应用数据。")
+                Text("支持 dylib、deb、zip。导入后立即修改并签名，成功后才更新列表；同名库直接覆盖。无需保留来源文件，重新修改请再次导入。移除全部处理列表中的第三方插件及 LC 导入资源，保留应用数据。")
             }
             if busy { ProgressView("正在准备插件…") }
         }
@@ -82,6 +79,53 @@ struct LCAppPluginsView: View {
         } message: { Text("\(removal.joined(separator: "\n"))\n移除应用自带依赖可能导致应用无法启动。") }
     }
 
+    private func libraryRow(_ image: LCAppPlugins.Image) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(image.id).font(.footnote).textSelection(.enabled)
+                Spacer()
+                if image.isPlugin {
+                    Button(role: .destructive) {
+                        removal = [removalPath(image.id)]
+                        confirmingRemoval = true
+                    } label: { Image(systemName: "trash") }
+                        .buttonStyle(.borderless).accessibilityLabel("移除 \(image.id)")
+                } else {
+                    Button("纳入插件管理") { classify(image, asPlugin: true) }
+                        .font(.caption).buttonStyle(.borderless)
+                }
+            }
+            Text("\(image.managed ? "LC 导入" : image.isPlugin ? "IPA 内第三方插件" : "来源未确认") · \(image.linked ? "在静态加载链中" : "文件存在")")
+                .font(.caption).foregroundColor(.secondary)
+        }
+        .contextMenu {
+            if image.isPlugin && !image.managed {
+                Button("标记为应用原有库") { classify(image, asPlugin: false) }
+            }
+        }
+    }
+
+    private func classify(_ image: LCAppPlugins.Image, asPlugin: Bool) {
+        classifications[image.id] = asPlugin
+        classificationChanged = true
+        reload()
+    }
+
+    private func confirmVisibility() {
+        do {
+            for container in model.appInfo.containers {
+                if LCSharedUtils.getContainerUsingLCScheme(withFolderName: container.folderName) != nil {
+                    throw LCPluginError("请先退出正在运行的应用，再确认隐藏插件。")
+                }
+            }
+            let count = try LCAppPlugins.confirmVisibility(app: model.appInfo, classifications: classifications)
+            model.uiHideLiveContainer = true
+            classificationChanged = false
+            reload()
+            message = "已确认隐藏 \(count) 个插件库，下次启动应用生效。插件仍会正常加载。"
+        } catch { message = error.localizedDescription }
+    }
+
     private func removalPath(_ image: String) -> String {
         let components = image.split(separator: "/").map(String.init)
         if let index = components.firstIndex(where: { $0.lowercased().hasSuffix(".framework") }) {
@@ -94,7 +138,8 @@ struct LCAppPluginsView: View {
         launchDiagnostic = NSDictionary(contentsOfFile: URL(fileURLWithPath: model.appInfo.bundlePath()).appendingPathComponent("LCPluginLaunch.plist").path) as? [String: Any] ?? [:]
         inspection = nil
         do {
-            inspection = try LCAppPlugins.inspect(app: model.appInfo)
+            if !classificationChanged { classifications = try LCAppPlugins.savedClassifications(app: model.appInfo) }
+            inspection = try LCAppPlugins.inspect(app: model.appInfo, classifications: classifications)
         }
         catch { message = error.localizedDescription }
     }
