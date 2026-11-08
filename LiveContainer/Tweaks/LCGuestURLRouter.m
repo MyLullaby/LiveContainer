@@ -10,6 +10,22 @@ static NSDictionary *returnTarget;
 static NSDate *returnDate;
 static BOOL initialURLDelivered;
 
+static void LCGuestURLLog(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
+static void LCGuestURLLog(NSString *format, ...) {
+    va_list args;
+    va_start(args, format);
+    NSString *message = [[NSString alloc] initWithFormat:format arguments:args];
+    va_end(args);
+    NSString *key = [@"LCGuestURLDiagnostics." stringByAppendingString:NSBundle.mainBundle.bundlePath.lastPathComponent];
+    @synchronized (LCGuestURLRouter.class) {
+        NSMutableArray *lines = [[NSUserDefaults.lcSharedDefaults arrayForKey:key] mutableCopy] ?: [NSMutableArray new];
+        [lines addObject:[NSString stringWithFormat:@"%@ %@", NSDate.date, message]];
+        if (lines.count > 100) [lines removeObjectsInRange:NSMakeRange(0, lines.count - 100)];
+        [NSUserDefaults.lcSharedDefaults setObject:lines forKey:key];
+    }
+    NSLog(@"[LC][GuestURL] %@", message);
+}
+
 static BOOL LCValidComponent(NSString *value) {
     return value.length && [value isEqualToString:value.lastPathComponent] && ![@[@".", @".."] containsObject:value];
 }
@@ -59,7 +75,11 @@ static NSArray<NSString *> *LCGuestRoots(void) {
 
 static NSDictionary *LCTargetForURL(NSURL *url) {
     NSString *scheme = url.scheme.lowercaseString;
-    if (!LCIsGuestScheme(scheme) || [LCSchemes(NSBundle.mainBundle.infoDictionary) containsObject:scheme]) return nil;
+    if (!LCIsGuestScheme(scheme)) return nil;
+    if ([LCSchemes(NSBundle.mainBundle.infoDictionary) containsObject:scheme]) {
+        LCGuestURLLog(@"resolve scheme=%@ result=self", scheme);
+        return nil;
+    }
     BOOL returning = returnTarget && -returnDate.timeIntervalSinceNow < 900 && [returnTarget[@"schemes"] containsObject:scheme] &&
         [LCSharedUtils getContainerUsingLCSchemeWithFolderName:returnTarget[@"container"]];
     NSString *shared = [[[[LCSharedUtils appGroupPath] path] stringByAppendingPathComponent:@"LiveContainer/Applications"] stringByResolvingSymlinksInPath];
@@ -70,7 +90,10 @@ static NSDictionary *LCTargetForURL(NSURL *url) {
             NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:[path stringByAppendingPathComponent:@"Info.plist"]];
             if (![LCSchemes(info) containsObject:scheme]) continue;
             NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:[path stringByAppendingPathComponent:@"LCAppInfo.plist"]];
-            if ([settings[@"isHidden"] boolValue] && [NSUserDefaults.lcSharedDefaults boolForKey:@"LCStrictHiding"]) continue;
+            if ([settings[@"isHidden"] boolValue] && [NSUserDefaults.lcSharedDefaults boolForKey:@"LCStrictHiding"]) {
+                LCGuestURLLog(@"resolve scheme=%@ excluded=strict-hidden bundle=%@", scheme, name);
+                continue;
+            }
             NSString *container = settings[@"LCDataUUID"];
             NSMutableArray *containers = [NSMutableArray new];
             if (container) [containers addObject:container];
@@ -87,17 +110,24 @@ static NSDictionary *LCTargetForURL(NSURL *url) {
             if (isReturnTarget) container = returnTarget[@"container"];
             else if (running.count == 1) container = running.firstObject;
             if (!container) container = containers.firstObject ?: @"";
-            if (!isReturnTarget && running.count > 1) continue;
+            if (!isReturnTarget && running.count > 1) {
+                LCGuestURLLog(@"resolve scheme=%@ excluded=multiple-running-containers bundle=%@", scheme, name);
+                continue;
+            }
             [matches addObject:@{@"bundle": name, @"container": container, @"shared": @([root isEqualToString:shared]),
                                  @"locked": @([settings[@"isLocked"] boolValue] || [settings[@"isHidden"] boolValue])}];
         }
     }
     if (returning) {
         for (NSDictionary *target in matches) {
-            if ([target[@"bundle"] isEqualToString:returnTarget[@"bundle"]] && [target[@"container"] isEqualToString:returnTarget[@"container"]]) return target;
+            if ([target[@"bundle"] isEqualToString:returnTarget[@"bundle"]] && [target[@"container"] isEqualToString:returnTarget[@"container"]]) {
+                LCGuestURLLog(@"resolve scheme=%@ result=callback bundle=%@", scheme, target[@"bundle"]);
+                return target;
+            }
         }
     }
     // Do not silently choose between different apps registering the same scheme.
+    LCGuestURLLog(@"resolve scheme=%@ matches=%lu bundles=%@", scheme, (unsigned long)matches.count, [matches valueForKey:@"bundle"]);
     return matches.count == 1 ? matches.firstObject : nil;
 }
 
@@ -115,6 +145,10 @@ static void LCRouteError(NSString *message) {
 }
 
 @implementation LCGuestURLRouter
++ (NSString *)diagnosticsForBundleName:(NSString *)bundleName {
+    NSArray *lines = [NSUserDefaults.lcSharedDefaults arrayForKey:[@"LCGuestURLDiagnostics." stringByAppendingString:bundleName]];
+    return lines.count ? [lines componentsJoinedByString:@"\n"] : @"暂无诊断记录。请使用包含诊断功能的 LC 完全退出并重新启动此应用，再复现一次。";
+}
 + (BOOL)canRouteURL:(NSURL *)url { return !NSUserDefaults.isSideStore && LCTargetForURL(url) != nil; }
 
 + (NSDictionary *)requestForURL:(NSURL *)url {
@@ -155,6 +189,7 @@ static void LCSendGuestURL(NSURL *url, NSDictionary *target, void (^completion)(
     }
     if (!destination) {
         LCRouteError(@"没有可用的 LiveContainer 承接目标应用。请将目标应用设为共享，并准备一个空闲 LC2/LC3，或使用多任务模式；当前应用会保持运行。");
+        LCGuestURLLog(@"send scheme=%@ bundle=%@ result=no-free-host", url.scheme.lowercaseString, target[@"bundle"]);
         if (completion) completion(NO);
         return;
     }
@@ -169,10 +204,12 @@ static void LCSendGuestURL(NSURL *url, NSDictionary *target, void (^completion)(
         [NSURLQueryItem queryItemWithName:@"source-bundle" value:NSBundle.mainBundle.bundlePath.lastPathComponent],
         [NSURLQueryItem queryItemWithName:@"source-container" value:@(getenv("HOME")).lastPathComponent]]];
     control.queryItems = query;
+    LCGuestURLLog(@"send scheme=%@ bundle=%@ destination=%@ multitask=%d", url.scheme.lowercaseString, target[@"bundle"], destination, multitask);
     [UIApplication.sharedApplication openURL:control.URL options:@{} completionHandler:completion];
 }
 
 static BOOL LCRouteGuestURL(NSURL *url, void (^completion)(BOOL)) {
+    LCGuestURLLog(@"openURL scheme=%@", url.scheme.lowercaseString ?: @"(none)");
     NSDictionary *target = LCTargetForURL(url);
     if (!target) return NO;
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -219,7 +256,10 @@ static NSURL *LCDecodeGuestURL(NSURL *url, NSString **source) {
 
 @implementation UIApplication (LCGuestURLRouter)
 - (BOOL)lc_guest_canOpenURL:(NSURL *)url {
-    return [LCGuestURLRouter canRouteURL:url] || [self lc_guest_canOpenURL:url];
+    BOOL routed = [LCGuestURLRouter canRouteURL:url];
+    BOOL result = routed || [self lc_guest_canOpenURL:url];
+    if (LCIsGuestScheme(url.scheme)) LCGuestURLLog(@"canOpenURL scheme=%@ guest=%d result=%d", url.scheme.lowercaseString, routed, result);
+    return result;
 }
 - (void)lc_guest_openURL:(NSURL *)url options:(NSDictionary *)options completionHandler:(void (^)(BOOL))completion {
     if (!LCRouteGuestURL(url, completion)) [self lc_guest_openURL:url options:options completionHandler:completion];
@@ -296,6 +336,18 @@ void LCGuestURLRouterInit(void) {
     if (!NSUserDefaults.lcGuestAppId || NSUserDefaults.isSideStore) return;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
+        LCGuestURLLog(@"startup guest-url-r2 build=%@ host=%@ guest=%@ iOS=%@ liveProcess=%d shared=%d strictHiding=%d tweakLoaderDisabled=%d", NSUserDefaults.lcMainBundle.infoDictionary[@"LCVersionInfo"], NSUserDefaults.lcAppUrlScheme, NSUserDefaults.lcGuestAppId, UIDevice.currentDevice.systemVersion, NSUserDefaults.isLiveProcess, NSUserDefaults.isSharedApp, [NSUserDefaults.lcSharedDefaults boolForKey:@"LCStrictHiding"], [NSUserDefaults.guestAppInfo[@"dontLoadTweakLoader"] boolValue]);
+        LCGuestURLLog(@"own schemes=%@", LCSchemes(NSBundle.mainBundle.infoDictionary));
+        for (NSString *root in LCGuestRoots()) {
+            NSError *error;
+            NSArray *names = [NSFileManager.defaultManager contentsOfDirectoryAtPath:root error:&error];
+            LCGuestURLLog(@"scan root=%@ entries=%lu error=%@/%ld", root, (unsigned long)names.count, error.domain ?: @"none", (long)error.code);
+            for (NSString *name in names) {
+                if (![name.pathExtension.lowercaseString isEqualToString:@"app"]) continue;
+                NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:[[root stringByAppendingPathComponent:name] stringByAppendingPathComponent:@"Info.plist"]];
+                LCGuestURLLog(@"installed bundle=%@ infoReadable=%d schemes=%@", name, info != nil, LCSchemes(info));
+            }
+        }
         [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
             // Apps without scenes receive the same cold-start request through their AppDelegate.
             if (initialURLDelivered) return;
@@ -320,7 +372,9 @@ void LCGuestURLRouterInit(void) {
             @[UIScene.class, @"openURL:options:completionHandler:", @"lc_guest_openURL:options:completionHandler:"],
             @[UIScene.class, @"scene:didReceiveActions:fromTransitionContext:", @"lc_guest_scene:didReceiveActions:fromTransitionContext:"]]) {
             Class cls = entry[0]; SEL original = NSSelectorFromString(entry[1]);
-            if ([cls instancesRespondToSelector:original]) swizzle(cls, original, NSSelectorFromString(entry[2]));
+            BOOL available = [cls instancesRespondToSelector:original];
+            if (available) swizzle(cls, original, NSSelectorFromString(entry[2]));
+            LCGuestURLLog(@"hook %@ %@ installed=%d", NSStringFromClass(cls), entry[1], available);
         }
     });
 }
