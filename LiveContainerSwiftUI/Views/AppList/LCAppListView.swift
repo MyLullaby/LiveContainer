@@ -1237,6 +1237,13 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     }
     
     func handleURL(url : URL) {
+        if url.host == "guest-route" {
+            Task { @MainActor in
+                do { try await LCGuestURLRouting.open(url, delegate: self) }
+                catch { errorInfo = error.localizedDescription; errorShow = true }
+            }
+            return
+        }
         if url.isFileURL {
             if LCAppPlugins.extensions.contains(url.pathExtension.lowercased()) {
                 receivePlugins([url])

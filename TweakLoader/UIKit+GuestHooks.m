@@ -4,6 +4,7 @@
 #import "../LiveContainer/utils.h"
 #import <LocalAuthentication/LocalAuthentication.h>
 #import "Localization.h"
+#import "../LiveContainer/Tweaks/LCGuestURLRouter.h"
 
 UIInterfaceOrientation LCOrientationLock = UIInterfaceOrientationUnknown;
 NSMutableArray<NSString*>* LCSupportedUrlSchemes = nil;
@@ -416,6 +417,8 @@ static LCControlAppURLHandling LCHandleControlAppURL(NSURL *url, NSString** modi
     if(!url || url.isFileURL) {
         return LCControlAppURLHandlingPassThrough;
     }
+    if ([url.scheme.lowercaseString isEqualToString:NSUserDefaults.lcAppUrlScheme.lowercaseString] &&
+        [url.host isEqualToString:@"guest-route"]) return LCControlAppURLHandlingPassThrough;
 
     if ([NSClassFromString(@"LCSharedUtils") handleReturnToLibraryURL:url] != LCReturnToLibraryResultNotHandled) {
         return LCControlAppURLHandlingStop;
@@ -553,6 +556,7 @@ static NSURL *LCURLFromPayload(id value) {
 - (void)hook__connectUISceneFromFBSScene:(id)scene transitionContext:(UIApplicationSceneTransitionContext*)context {
 #if !TARGET_OS_MACCATALYST
     NSString* decodedUrlStr = launchURLProcessed ? nil : NSUserDefaults.lcLaunchURL;
+    if ([[NSURL URLWithString:decodedUrlStr ?: @""].host isEqualToString:@"guest-route"]) decodedUrlStr = nil;
     launchURLProcessed = YES;
     NSString *urlStr = LCURLFromPayload(context.payload[UIApplicationLaunchOptionsURLKey]).absoluteString;
     // A newly connected scene can carry its URL only in actions, without a payload dictionary.
@@ -589,7 +593,8 @@ static NSURL *LCURLFromPayload(id value) {
                 // Convert the base64 encoded url into String
                 NSData *decodedData = [[NSData alloc] initWithBase64EncodedString:realUrlEncoded options:0];
                 decodedUrlStr = [[NSString alloc] initWithData:decodedData encoding:NSUTF8StringEncoding];
-            } else if([urlStr hasPrefix:NSUserDefaults.lcAppUrlScheme]) {
+            } else if([urlStr hasPrefix:NSUserDefaults.lcAppUrlScheme] &&
+                      ![[NSURL URLWithString:urlStr].host isEqualToString:@"guest-route"]) {
                 context.payload = nil;
                 context.actions = nil;
             }
@@ -651,6 +656,10 @@ static NSURL *LCURLFromPayload(id value) {
 }
 
 - (void)hook_openURL:(NSURL *)url options:(NSDictionary<NSString *,id> *)options completionHandler:(void (^)(_Bool))completion {
+    if ([LCGuestURLRouter canRouteURL:url]) {
+        [self hook_openURL:url options:options completionHandler:completion];
+        return;
+    }
     if(NSUserDefaults.isSideStore && ![url.scheme isEqualToString:@"livecontainer"]) {
         [self hook_openURL:url options:options completionHandler:completion];
         return;
@@ -737,6 +746,10 @@ static NSURL *LCURLFromPayload(id value) {
 }
 
 - (void)hook_openURL:(NSURL *)url options:(UISceneOpenExternalURLOptions *)options completionHandler:(void (^)(BOOL success))completion {
+    if ([LCGuestURLRouter canRouteURL:url]) {
+        [self hook_openURL:url options:options completionHandler:completion];
+        return;
+    }
     BOOL openSelf = canAppOpenItself(url);
     BOOL redirectToHost = shouldRedirectOpenURLToHost(url);
     if(openSelf || redirectToHost) {

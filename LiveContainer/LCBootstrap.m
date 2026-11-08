@@ -1,6 +1,7 @@
 #import "FoundationPrivate.h"
 #import "LCMachOUtils.h"
 #import "LCSharedUtils.h"
+#import "Tweaks/LCGuestURLRouter.h"
 #import "UIKitPrivate.h"
 #import "utils.h"
 
@@ -520,6 +521,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     // hook NSUserDefault before running libraries' initializers
     NUDGuestHooksInit();
     LCReturnToLibraryHooksInit();
+    LCGuestURLRouterInit();
     if(!isSideStore) {
         SecItemGuestHooksInit();
         NSFMGuestHooksInit();
