@@ -125,10 +125,6 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
 
 + (BOOL)launchToGuestAppWithClassicMode:(NSUInteger)classicMode {
     void (^completionHandler)(BOOL) = ^(BOOL success) {
-        if ([[lcUserDefaults stringForKey:@"selected"] isEqualToString:@"ui"]) {
-            [NSUserDefaults.lcSharedDefaults setObject:[NSString stringWithFormat:@"%@ %@: relaunch callback success=%d", NSDate.date, NSUserDefaults.lcAppUrlScheme, success] forKey:@"LCReturnToLibraryLastReturn"];
-            [NSUserDefaults.lcSharedDefaults synchronize];
-        }
         // syscall(SYS_ptrace, PT_DENY_ATTACH, 0, 0, 0);
         __asm__ __volatile__ (
                               "mov x0, #31\n"
@@ -201,8 +197,6 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
 }
 
 + (LCReturnToLibraryResult)returnToLibrary {
-    [NSUserDefaults.lcSharedDefaults setObject:[NSString stringWithFormat:@"%@ %@: return requested, liveProcess=%d", NSDate.date, NSUserDefaults.lcAppUrlScheme, NSUserDefaults.isLiveProcess] forKey:@"LCReturnToLibraryLastReturn"];
-    [NSUserDefaults.lcSharedDefaults synchronize];
     NSLog(@"[LC] Return-to-library requested: scheme=%@ guest=%@ liveProcess=%d", NSUserDefaults.lcAppUrlScheme, NSUserDefaults.lcGuestAppId, NSUserDefaults.isLiveProcess);
     if (NSUserDefaults.isLiveProcess) {
         // The library belongs to the host, not this extension's process or defaults.

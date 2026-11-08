@@ -1239,7 +1239,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     func handleURL(url : URL) {
         if url.host == "guest-route" {
             Task { @MainActor in
-                do { try await LCGuestURLRouting.open(url, delegate: self) }
+                do { try await LCGuestURLRouting.open(url) }
                 catch { errorInfo = error.localizedDescription; errorShow = true }
             }
             return

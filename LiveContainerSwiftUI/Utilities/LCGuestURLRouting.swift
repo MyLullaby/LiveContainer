@@ -1,7 +1,7 @@
 import Foundation
 
 enum LCGuestURLRouting {
-    @MainActor static func open(_ url: URL, delegate: LCAppModelDelegate) async throws {
+    @MainActor static func open(_ url: URL) async throws {
         guard let request = LCGuestURLRouter.request(for: url),
               let bundle = request["bundle-name"] as? String,
               let container = request["container-folder-name"] as? String,
@@ -10,24 +10,18 @@ enum LCGuestURLRouting {
         }
         let model = DataManager.shared.model
         try model.reloadApps()
-        let apps = model.apps + (LCUtils.appGroupUserDefault.bool(forKey: "LCStrictHiding") ? [] : model.hiddenApps)
+        guard MultitaskManager.isUsing(container: container) else {
+            throw LCPluginError("目标应用已停止运行，请先手动打开后重试。")
+        }
+        let apps = model.apps + model.hiddenApps
         guard let app = apps.first(where: { $0.appInfo.relativeBundlePath == bundle }),
-              container.isEmpty || app.appInfo.containers.contains(where: { $0.folderName == container }),
+              app.appInfo.containers.contains(where: { $0.folderName == container }),
               (app.appInfo.urlSchemes() as? [String] ?? []).contains(where: { $0.lowercased() == scheme }) else {
             throw LCPluginError("未找到目标应用或数据容器。")
         }
-        if app.appInfo.isLocked || app.appInfo.isHidden {
-            guard try await LCUtils.authenticateUser() else { return }
+        // Deliver only to an existing window; never enter runApp's signing or launch fallback.
+        guard await app.bringExistingMultitaskWindowIfNeeded(dataUUID: container, urlScheme: url.absoluteString) else {
+            throw LCPluginError("目标应用窗口已关闭，请先手动打开后重试。")
         }
-        // Preserve the URL envelope until the target's base hooks can restore the callback context.
-        let multitask = request["multitask"] as? String == "1" || MultitaskManager.isUsing(container: container)
-        if multitask && app.appInfo.defaultClassicMode != 0 {
-            throw LCPluginError("目标应用使用经典模式，请准备一个空闲 LC2/LC3 承接跳转。")
-        }
-        if !multitask && MultitaskManager.isMultitasking() {
-            throw LCPluginError("目标 LC 正承载多任务应用，请准备一个空闲 LC2/LC3，当前应用会保持运行。")
-        }
-        app.delegate = delegate
-        try await app.runApp(multitask: multitask, containerFolderName: container.isEmpty ? nil : container, urlStr: url.absoluteString)
     }
 }

@@ -270,16 +270,10 @@ class LCAppModel: ObservableObject, Hashable {
             var openURLComp = URLComponents()
             openURLComp.scheme = runningLC
             if let urlStr {
-                if let route = URLComponents(string: urlStr), route.host == "guest-route",
-                   let scheme = route.scheme, LCSharedUtils.lcUnorderedUrlSchemes().contains(scheme) {
-                    openURLComp.host = route.host
-                    openURLComp.queryItems = route.queryItems
-                } else {
-                    openURLComp.host = "open-url"
-                    openURLComp.queryItems = [
-                        URLQueryItem(name: "url", value: Data(urlStr.utf8).base64EncodedString())
-                    ]
-                }
+                openURLComp.host = "open-url"
+                openURLComp.queryItems = [
+                    URLQueryItem(name: "url", value: Data(urlStr.utf8).base64EncodedString())
+                ]
             }
             if await UIApplication.shared.canOpenURL(openURLComp.url!) {
                 await UIApplication.shared.open(openURLComp.url!)
@@ -549,7 +543,7 @@ class LCAppModel: ObservableObject, Hashable {
         
     }
     
-    private func bringExistingMultitaskWindowIfNeeded(dataUUID: String, urlScheme: String?) async -> Bool {
+    func bringExistingMultitaskWindowIfNeeded(dataUUID: String, urlScheme: String?) async -> Bool {
         guard #available(iOS 16.0, *) else { return false }
         return await MainActor.run {
             if let urlScheme {

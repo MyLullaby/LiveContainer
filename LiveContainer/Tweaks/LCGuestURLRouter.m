@@ -3,7 +3,6 @@
 #import "UIKitPrivate.h"
 #import "utils.h"
 #import "Tweaks.h"
-#import <LocalAuthentication/LocalAuthentication.h>
 
 // shortcut: Keep one callback target for 15 minutes; track requests separately if concurrent login flows are needed.
 static NSDictionary *returnTarget;
@@ -82,18 +81,13 @@ static NSDictionary *LCTargetForURL(NSURL *url) {
     }
     BOOL returning = returnTarget && -returnDate.timeIntervalSinceNow < 900 && [returnTarget[@"schemes"] containsObject:scheme] &&
         [LCSharedUtils getContainerUsingLCSchemeWithFolderName:returnTarget[@"container"]];
-    NSString *shared = [[[[LCSharedUtils appGroupPath] path] stringByAppendingPathComponent:@"LiveContainer/Applications"] stringByResolvingSymlinksInPath];
-    NSMutableArray *matches = [NSMutableArray new];
+    NSDictionary *firstTarget;
     for (NSString *root in LCGuestRoots()) {
         for (NSString *name in [[NSFileManager.defaultManager contentsOfDirectoryAtPath:root error:nil] sortedArrayUsingSelector:@selector(compare:)]) {
             NSString *path = [root stringByAppendingPathComponent:name];
             NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:[path stringByAppendingPathComponent:@"Info.plist"]];
             if (![LCSchemes(info) containsObject:scheme]) continue;
             NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:[path stringByAppendingPathComponent:@"LCAppInfo.plist"]];
-            if ([settings[@"isHidden"] boolValue] && [NSUserDefaults.lcSharedDefaults boolForKey:@"LCStrictHiding"]) {
-                LCGuestURLLog(@"resolve scheme=%@ excluded=strict-hidden bundle=%@", scheme, name);
-                continue;
-            }
             NSString *container = settings[@"LCDataUUID"];
             NSMutableArray *containers = [NSMutableArray new];
             if (container) [containers addObject:container];
@@ -101,34 +95,20 @@ static NSDictionary *LCTargetForURL(NSURL *url) {
                 NSString *folder = entry[@"folderName"];
                 if (folder && ![containers containsObject:folder]) [containers addObject:folder];
             }
-            NSMutableArray *running = [NSMutableArray new];
             for (NSString *folder in containers) {
-                if ([LCSharedUtils getContainerUsingLCSchemeWithFolderName:folder]) [running addObject:folder];
-            }
-            // A reply goes back to the initiating container, including apps with multiple accounts.
-            BOOL isReturnTarget = returning && [returnTarget[@"bundle"] isEqualToString:name] && [containers containsObject:returnTarget[@"container"]];
-            if (isReturnTarget) container = returnTarget[@"container"];
-            else if (running.count == 1) container = running.firstObject;
-            if (!container) container = containers.firstObject ?: @"";
-            if (!isReturnTarget && running.count > 1) {
-                LCGuestURLLog(@"resolve scheme=%@ excluded=multiple-running-containers bundle=%@", scheme, name);
-                continue;
-            }
-            [matches addObject:@{@"bundle": name, @"container": container, @"shared": @([root isEqualToString:shared]),
-                                 @"locked": @([settings[@"isLocked"] boolValue] || [settings[@"isHidden"] boolValue])}];
-        }
-    }
-    if (returning) {
-        for (NSDictionary *target in matches) {
-            if ([target[@"bundle"] isEqualToString:returnTarget[@"bundle"]] && [target[@"container"] isEqualToString:returnTarget[@"container"]]) {
-                LCGuestURLLog(@"resolve scheme=%@ result=callback bundle=%@", scheme, target[@"bundle"]);
-                return target;
+                if (![LCSharedUtils getContainerUsingLCSchemeWithFolderName:folder]) continue;
+                NSDictionary *target = @{@"bundle": name, @"container": folder};
+                // Replies still return to the specific container that initiated the request.
+                if (returning && [returnTarget[@"bundle"] isEqualToString:name] && [returnTarget[@"container"] isEqualToString:folder]) {
+                    LCGuestURLLog(@"resolve scheme=%@ result=callback bundle=%@ container=%@", scheme, name, folder);
+                    return target;
+                }
+                if (!firstTarget) firstTarget = target;
             }
         }
     }
-    // Do not silently choose between different apps registering the same scheme.
-    LCGuestURLLog(@"resolve scheme=%@ matches=%lu bundles=%@", scheme, (unsigned long)matches.count, [matches valueForKey:@"bundle"]);
-    return matches.count == 1 ? matches.firstObject : nil;
+    LCGuestURLLog(@"resolve scheme=%@ result=%@ bundle=%@ container=%@", scheme, firstTarget ? @"running" : @"not-running", firstTarget[@"bundle"] ?: @"none", firstTarget[@"container"] ?: @"none");
+    return firstTarget;
 }
 
 static void LCRouteError(NSString *message) {
@@ -162,7 +142,7 @@ static void LCRouteError(NSString *message) {
     NSString *bundle = values[@"bundle-name"], *container = values[@"container-folder-name"];
     NSData *data = [[NSData alloc] initWithBase64EncodedString:values[@"open-url"] ?: @"" options:0];
     NSString *original = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
-    if (!LCValidComponent(bundle) || !container || (container.length && !LCValidComponent(container)) ||
+    if (!LCValidComponent(bundle) || !LCValidComponent(container) ||
         !original.length || !LCIsGuestScheme([NSURL URLWithString:original].scheme)) return nil;
     values[@"url"] = original;
     return values;
@@ -170,26 +150,11 @@ static void LCRouteError(NSString *message) {
 @end
 
 static void LCSendGuestURL(NSURL *url, NSDictionary *target, void (^completion)(BOOL)) {
-    NSString *running = [target[@"container"] length] ? [LCSharedUtils getContainerUsingLCSchemeWithFolderName:target[@"container"]] : nil;
+    NSString *running = [LCSharedUtils getContainerUsingLCSchemeWithFolderName:target[@"container"]];
     NSString *destination = running.stringByDeletingPathExtension;
-    // Older hosts record only their scheme for LiveProcess; the host UI can still deliver to the existing window.
-    BOOL multitask = [running hasSuffix:@".liveprocess"] || (NSUserDefaults.isLiveProcess && [destination isEqualToString:NSUserDefaults.lcAppUrlScheme]);
     if (!destination) {
-        for (NSString *scheme in [LCSharedUtils lcUrlSchemes]) {
-            if ([scheme isEqualToString:NSUserDefaults.lcAppUrlScheme] || ![target[@"shared"] boolValue]) continue;
-            if (![LCSharedUtils isLCSchemeInUse:scheme] && [UIApplication.sharedApplication canOpenURL:[NSURL URLWithString:[scheme stringByAppendingString:@"://"]]]) {
-                destination = scheme;
-                break;
-            }
-        }
-        if (!destination && NSUserDefaults.isLiveProcess) {
-            destination = NSUserDefaults.lcAppUrlScheme;
-            multitask = YES;
-        }
-    }
-    if (!destination) {
-        LCRouteError(@"没有可用的 LiveContainer 承接目标应用。请将目标应用设为共享，并准备一个空闲 LC2/LC3，或使用多任务模式；当前应用会保持运行。");
-        LCGuestURLLog(@"send scheme=%@ bundle=%@ result=no-free-host", url.scheme.lowercaseString, target[@"bundle"]);
+        LCRouteError(@"目标应用已停止运行，请先手动打开后重试。");
+        LCGuestURLLog(@"send scheme=%@ bundle=%@ result=target-stopped", url.scheme.lowercaseString, target[@"bundle"]);
         if (completion) completion(NO);
         return;
     }
@@ -200,11 +165,10 @@ static void LCSendGuestURL(NSURL *url, NSDictionary *target, void (^completion)(
         [NSURLQueryItem queryItemWithName:@"bundle-name" value:target[@"bundle"]],
         [NSURLQueryItem queryItemWithName:@"container-folder-name" value:target[@"container"]],
         [NSURLQueryItem queryItemWithName:@"open-url" value:[[url.absoluteString dataUsingEncoding:NSUTF8StringEncoding] base64EncodedStringWithOptions:0]],
-        [NSURLQueryItem queryItemWithName:@"multitask" value:multitask ? @"1" : @"0"],
         [NSURLQueryItem queryItemWithName:@"source-bundle" value:NSBundle.mainBundle.bundlePath.lastPathComponent],
         [NSURLQueryItem queryItemWithName:@"source-container" value:@(getenv("HOME")).lastPathComponent]]];
     control.queryItems = query;
-    LCGuestURLLog(@"send scheme=%@ bundle=%@ destination=%@ multitask=%d", url.scheme.lowercaseString, target[@"bundle"], destination, multitask);
+    LCGuestURLLog(@"send scheme=%@ bundle=%@ destination=%@", url.scheme.lowercaseString, target[@"bundle"], destination);
     [UIApplication.sharedApplication openURL:control.URL options:@{} completionHandler:completion];
 }
 
@@ -212,17 +176,7 @@ static BOOL LCRouteGuestURL(NSURL *url, void (^completion)(BOOL)) {
     LCGuestURLLog(@"openURL scheme=%@", url.scheme.lowercaseString ?: @"(none)");
     NSDictionary *target = LCTargetForURL(url);
     if (!target) return NO;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if ([target[@"locked"] boolValue]) {
-            LAContext *context = [LAContext new];
-            [context evaluatePolicy:LAPolicyDeviceOwnerAuthentication localizedReason:@"打开 LC 内的应用" reply:^(BOOL success, NSError *error) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    if (success) LCSendGuestURL(url, target, completion);
-                    else if (completion) completion(NO);
-                });
-            }];
-        } else LCSendGuestURL(url, target, completion);
-    });
+    dispatch_async(dispatch_get_main_queue(), ^{ LCSendGuestURL(url, target, completion); });
     return YES;
 }
 
@@ -231,7 +185,7 @@ static NSURL *LCDecodeGuestURL(NSURL *url, NSString **source) {
     if (!request) return nil;
     NSURL *original = [NSURL URLWithString:request[@"url"]];
     if (![request[@"bundle-name"] isEqualToString:NSBundle.mainBundle.bundlePath.lastPathComponent] ||
-        ([request[@"container-folder-name"] length] && ![request[@"container-folder-name"] isEqualToString:@(getenv("HOME")).lastPathComponent]) ||
+        ![request[@"container-folder-name"] isEqualToString:@(getenv("HOME")).lastPathComponent] ||
         ![LCSchemes(NSBundle.mainBundle.infoDictionary) containsObject:original.scheme.lowercaseString]) return nil;
     NSString *fromContainer = request[@"source-container"];
     NSString *fromBundle = request[@"source-bundle"];
@@ -336,7 +290,7 @@ void LCGuestURLRouterInit(void) {
     if (!NSUserDefaults.lcGuestAppId || NSUserDefaults.isSideStore) return;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        LCGuestURLLog(@"startup guest-url-r2 build=%@ host=%@ guest=%@ iOS=%@ liveProcess=%d shared=%d strictHiding=%d tweakLoaderDisabled=%d", NSUserDefaults.lcMainBundle.infoDictionary[@"LCVersionInfo"], NSUserDefaults.lcAppUrlScheme, NSUserDefaults.lcGuestAppId, UIDevice.currentDevice.systemVersion, NSUserDefaults.isLiveProcess, NSUserDefaults.isSharedApp, [NSUserDefaults.lcSharedDefaults boolForKey:@"LCStrictHiding"], [NSUserDefaults.guestAppInfo[@"dontLoadTweakLoader"] boolValue]);
+        LCGuestURLLog(@"startup guest-url-r3 running-only build=%@ host=%@ guest=%@ iOS=%@ liveProcess=%d shared=%d tweakLoaderDisabled=%d", NSUserDefaults.lcMainBundle.infoDictionary[@"LCVersionInfo"], NSUserDefaults.lcAppUrlScheme, NSUserDefaults.lcGuestAppId, UIDevice.currentDevice.systemVersion, NSUserDefaults.isLiveProcess, NSUserDefaults.isSharedApp, [NSUserDefaults.guestAppInfo[@"dontLoadTweakLoader"] boolValue]);
         LCGuestURLLog(@"own schemes=%@", LCSchemes(NSBundle.mainBundle.infoDictionary));
         for (NSString *root in LCGuestRoots()) {
             NSError *error;

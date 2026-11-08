@@ -3,7 +3,6 @@
 #import "UIKitPrivate.h"
 #import "utils.h"
 #import "Tweaks.h"
-#import <dlfcn.h>
 
 @interface UIStatusBarManager (LCReturnToLibrary)
 - (void)handleTapAction:(id)action;
@@ -28,9 +27,6 @@ static BOOL LCConsumeStatusBarTripleTap(id owner, NSString *source) {
         [taps removeAllObjects];
     }
     [taps addObject:@(now)];
-    [NSUserDefaults.lcSharedDefaults setObject:[NSString stringWithFormat:@"%@ %@: tap %lu (%@)",
-        NSDate.date, NSUserDefaults.lcAppUrlScheme, (unsigned long)taps.count, source]
-        forKey:@"LCReturnToLibraryLastTap"];
     if (taps.count == 3) {
         [taps removeAllObjects];
         NSLog(@"[LC][RTL] status bar triple tap via %@", source);
@@ -81,11 +77,5 @@ void LCReturnToLibraryHooksInit(void) {
         } else {
             NSLog(@"[LC][RTL] status bar tap handler unavailable");
         }
-        Dl_info coreInfo = {0};
-        dladdr((const void *)LCReturnToLibraryHooksInit, &coreInfo);
-        [NSUserDefaults.lcSharedDefaults setObject:[NSString stringWithFormat:@"clock-return-core-r3 %@\n%@ / %@ / iOS %@\nlocal=%d manager=%d\ncore=%s",
-            NSDate.date, NSUserDefaults.lcAppUrlScheme, NSUserDefaults.lcGuestAppId,
-            UIDevice.currentDevice.systemVersion, localTapAvailable, managerTapAvailable,
-            coreInfo.dli_fname ?: "unknown"] forKey:@"LCReturnToLibraryLoadedHooks"];
     });
 }

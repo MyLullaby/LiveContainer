@@ -208,40 +208,6 @@
         }
       }
     },
-    "lc.helpView.returnGestureDiagnostics" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Return gesture diagnostics"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "返回手势诊断"
-          }
-        }
-      }
-    },
-    "lc.helpView.noReturnGestureDiagnostics" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No core gesture initialization record. Open a guest in the updated LiveContainer, tap the status bar, then reopen this page."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "尚无基础手势初始化记录。请在更新后的 LiveContainer 中打开一个应用，点击状态栏，再回到此页查看。"
-          }
-        }
-      }
-    },
     "lc.helpView.returnToLibraryGesture" : {
       "extractionState" : "manual",
       "localizations" : {
