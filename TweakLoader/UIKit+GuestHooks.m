@@ -656,7 +656,7 @@ static NSURL *LCURLFromPayload(id value) {
 }
 
 - (void)hook_openURL:(NSURL *)url options:(NSDictionary<NSString *,id> *)options completionHandler:(void (^)(_Bool))completion {
-    if ([LCGuestURLRouter canRouteURL:url]) {
+    if ([NSClassFromString(@"LCGuestURLRouter") canRouteURL:url]) {
         [self hook_openURL:url options:options completionHandler:completion];
         return;
     }
@@ -746,7 +746,7 @@ static NSURL *LCURLFromPayload(id value) {
 }
 
 - (void)hook_openURL:(NSURL *)url options:(UISceneOpenExternalURLOptions *)options completionHandler:(void (^)(BOOL success))completion {
-    if ([LCGuestURLRouter canRouteURL:url]) {
+    if ([NSClassFromString(@"LCGuestURLRouter") canRouteURL:url]) {
         [self hook_openURL:url options:options completionHandler:completion];
         return;
     }
