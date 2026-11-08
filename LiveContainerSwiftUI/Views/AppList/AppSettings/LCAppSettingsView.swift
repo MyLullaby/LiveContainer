@@ -54,9 +54,6 @@ struct LCAppSettingsView: View {
             if !(model.appInfo is BuiltInSideStoreAppInfo) {
                 Section {
                     NavigationLink("应用插件") { LCAppPluginsView(model: model) }
-                    NavigationLink("应用间跳转诊断") {
-                        LCGuestURLDiagnosticsView(bundleName: appInfo.relativeBundlePath)
-                    }
                     Button("分享 IPA", systemImage: "square.and.arrow.up") {
                         Task { await shareIPA() }
                     }

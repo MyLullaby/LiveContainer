@@ -1,4 +1,5 @@
 #import "LCSharedUtils.h"
+#import "Tweaks/LCDebugLog.h"
 #import "FoundationPrivate.h"
 #import "UIKitPrivate.h"
 #import "utils.h"
@@ -178,11 +179,11 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
 }
 
 + (LCReturnToLibraryResult)handleReturnToLibraryURL:(NSURL *)url {
-    NSLog(@"[LC][RTL] enter url=%@ myScheme=%@ myBundle=%@ guest=%@ liveProcess=%d",
-          url.absoluteString, NSUserDefaults.lcAppUrlScheme,
+    LCDebugLog(@"ReturnToLibrary", @"enter scheme=%@ action=%@ myScheme=%@ myBundle=%@ guest=%@ liveProcess=%d",
+          url.scheme, url.host, NSUserDefaults.lcAppUrlScheme,
           NSBundle.mainBundle.bundleIdentifier, NSUserDefaults.lcGuestAppId, NSUserDefaults.isLiveProcess);
     if (![self isReturnToLibraryURL:url]) {
-        NSLog(@"[LC][RTL] not handled: scheme mismatch (url.scheme=%@ mine=%@)", url.scheme, NSUserDefaults.lcAppUrlScheme);
+        LCDebugLog(@"ReturnToLibrary", @"not handled: scheme mismatch (url.scheme=%@ mine=%@)", url.scheme, NSUserDefaults.lcAppUrlScheme);
         return LCReturnToLibraryResultNotHandled;
     }
     for (NSURLQueryItem *item in [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO].queryItems) {
@@ -197,15 +198,15 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
 }
 
 + (LCReturnToLibraryResult)returnToLibrary {
-    NSLog(@"[LC] Return-to-library requested: scheme=%@ guest=%@ liveProcess=%d", NSUserDefaults.lcAppUrlScheme, NSUserDefaults.lcGuestAppId, NSUserDefaults.isLiveProcess);
+    LCDebugLog(@"ReturnToLibrary", @"requested: scheme=%@ guest=%@ liveProcess=%d", NSUserDefaults.lcAppUrlScheme, NSUserDefaults.lcGuestAppId, NSUserDefaults.isLiveProcess);
     if (NSUserDefaults.isLiveProcess) {
         // The library belongs to the host, not this extension's process or defaults.
         NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@://return-to-library", NSUserDefaults.lcAppUrlScheme]];
         dispatch_async(dispatch_get_main_queue(), ^{
             UIApplication *application = [NSClassFromString(@"UIApplication") sharedApplication];
-            NSLog(@"[LC][RTL] liveProcess: forwarding to host");
+            LCDebugLog(@"ReturnToLibrary", @"liveProcess: forwarding to host");
             [application openURL:url options:@{} completionHandler:^(BOOL success) {
-                NSLog(@"[LC] Return-to-library forwarded to host: success=%d", success);
+                LCDebugLog(@"ReturnToLibrary", @"forwarded to host: success=%d", success);
             }];
         });
         return LCReturnToLibraryResultShowAppList;
@@ -215,13 +216,13 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
     // app list can be revealed in place. Restarting here would only cost a cold
     // launch and could not possibly return a different screen.
     if (!NSUserDefaults.lcGuestAppId) {
-        NSLog(@"[LC][RTL] library in place: ShowAppList (no restart)");
+        LCDebugLog(@"ReturnToLibrary", @"library in place: ShowAppList (no restart)");
         return LCReturnToLibraryResultShowAppList;
     }
 
     // A guest app owns this process: reset the per-instance launch state so the
     // relaunch lands on the library, then terminate and come back.
-    NSLog(@"[LC][RTL] guest running: clearing state and restarting");
+    LCDebugLog(@"ReturnToLibrary", @"guest running: clearing state and restarting");
     [lcUserDefaults setObject:@"ui" forKey:@"selected"];
     [lcUserDefaults removeObjectForKey:@"selectedContainer"];
     [lcUserDefaults removeObjectForKey:@"launchAppUrlScheme"];

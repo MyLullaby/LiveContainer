@@ -296,6 +296,7 @@ struct LCSettingsView: View {
                     } label: {
                         Text("lc.settings.dataManagement".loc)
                     }
+                    NavigationLink("Debug 模式") { LCDebugView() }
                 }
                 
                 Section {

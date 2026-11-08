@@ -2,6 +2,7 @@
 #import "LCMachOUtils.h"
 #import "LCSharedUtils.h"
 #import "Tweaks/LCGuestURLRouter.h"
+#import "Tweaks/LCDebugLog.h"
 #import "UIKitPrivate.h"
 #import "utils.h"
 
@@ -511,6 +512,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     }
     
     // hook NSUserDefault before running libraries' initializers
+    LCDebugLog(@"Launch", @"begin build=%@ iOS=%@ liveProcess=%d shared=%d sideStore=%d hideLC=%d tweakLoaderDisabled=%d", lcMainBundle.infoDictionary[@"LCVersionInfo"], NSProcessInfo.processInfo.operatingSystemVersionString, isLiveProcess, isSharedBundle, isSideStore, [guestAppInfo[@"hideLiveContainer"] ?: @YES boolValue], [guestAppInfo[@"dontLoadTweakLoader"] ?: @YES boolValue]);
     NUDGuestHooksInit();
     LCReturnToLibraryHooksInit();
     LCGuestURLRouterInit();
@@ -585,6 +587,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     } mutableCopy];
     void (^recordLaunchStage)(NSString *) = ^(NSString *stage) {
         launchDiagnostic[@"stage"] = stage;
+        LCDebugLog(@"Launch", @"stage=%@ error=%@", stage, launchDiagnostic[@"error"] ?: @"none");
         if (![launchDiagnostic writeBinToFile:launchDiagnosticPath atomically:YES]) {
             NSLog(@"[LCBootstrap] Could not save plugin launch diagnostics");
         }
@@ -647,6 +650,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
 
     BOOL threadInitializerChanged = class_getMethodImplementation(object_getClass(threadClass), @selector(initialize)) != threadInitializer;
     BOOL replayThreadInitialization = [guestAppInfo[@"replayThreadInitialization"] boolValue] && threadInitializerChanged;
+    LCDebugLog(@"ThreadInitialization", @"implementationChanged=%d replayRequested=%d", threadInitializerChanged, replayThreadInitialization);
     NSString *threadDiagnosticPath = [bundlePath stringByAppendingPathComponent:@"LCThreadInitialization.plist"];
     NSMutableDictionary *threadDiagnostic = [@{
         @"date": NSDate.date,
@@ -662,6 +666,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     if (replayThreadInitialization) {
         [threadClass performSelector:@selector(initialize)];
         threadDiagnostic[@"replayCompleted"] = @YES;
+        LCDebugLog(@"ThreadInitialization", @"replayCompleted=1");
         if (![threadDiagnostic writeBinToFile:threadDiagnosticPath atomically:YES]) {
             NSLog(@"[LCBootstrap] Could not save thread initialization replay result");
         }

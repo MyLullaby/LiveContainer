@@ -1,5 +1,6 @@
 @import UIKit;
 #import "LCSharedUtils.h"
+#import "LCDebugLog.h"
 #import "UIKitPrivate.h"
 #import "utils.h"
 #import "Tweaks.h"
@@ -29,7 +30,7 @@ static BOOL LCConsumeStatusBarTripleTap(id owner, NSString *source) {
     [taps addObject:@(now)];
     if (taps.count == 3) {
         [taps removeAllObjects];
-        NSLog(@"[LC][RTL] status bar triple tap via %@", source);
+        LCDebugLog(@"ReturnToLibrary", @"status bar triple tap via %@", source);
         [LCSharedUtils returnToLibrary];
         return YES;
     }
@@ -69,13 +70,14 @@ void LCReturnToLibraryHooksInit(void) {
         }];
         BOOL managerTapAvailable = [UIStatusBarManager instancesRespondToSelector:@selector(handleTapAction:)];
         BOOL localTapAvailable = [UIApplication instancesRespondToSelector:@selector(_scrollsToTopInitiatorView:touchesEnded:withEvent:)];
+        LCDebugLog(@"ReturnToLibrary", @"hooks manager=%d localTouches=%d", managerTapAvailable, localTapAvailable);
         if (localTapAvailable) {
             swizzle(UIApplication.class, @selector(_scrollsToTopInitiatorView:touchesEnded:withEvent:), @selector(lc_scrollsToTopInitiatorView:touchesEnded:withEvent:));
         }
         if (managerTapAvailable) {
             swizzle(UIStatusBarManager.class, @selector(handleTapAction:), @selector(lc_handleStatusBarTapAction:));
         } else {
-            NSLog(@"[LC][RTL] status bar tap handler unavailable");
+            LCDebugLog(@"ReturnToLibrary", @"status bar tap handler unavailable");
         }
     });
 }
