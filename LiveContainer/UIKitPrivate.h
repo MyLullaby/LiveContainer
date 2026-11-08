@@ -14,6 +14,7 @@
 
 @interface UIApplication(private)
 - (void)suspend;
+- (void)_terminateWithStatus:(int)status;
 - (void)_scrollsToTopInitiatorView:(UIView *)view touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event;
 - (UIActivityContinuationManager*)_getActivityContinuationManager;
 @end

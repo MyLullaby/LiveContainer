@@ -125,7 +125,30 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
 }
 
 + (BOOL)launchToGuestAppWithClassicMode:(NSUInteger)classicMode {
+    return [self relaunchWithClassicMode:classicMode exitHandler:nil];
+}
+
++ (BOOL)relaunchWithClassicMode:(NSUInteger)classicMode exitHandler:(void (^)(BOOL))exitHandler {
+    __block BOOL terminationRequested = NO;
+    __block NSUInteger failedAttempts = 0;
+    __block NSUInteger tries = 2;
     void (^completionHandler)(BOOL) = ^(BOOL success) {
+        if (exitHandler) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (terminationRequested) return;
+                if (!success) {
+                    if (++failedAttempts == tries) {
+                        terminationRequested = YES;
+                        LCDebugLog(@"ReturnToLibrary", @"relaunch failed; keeping guest alive");
+                        exitHandler(NO);
+                    }
+                    return;
+                }
+                terminationRequested = YES;
+                exitHandler(YES);
+            });
+            return;
+        }
         // syscall(SYS_ptrace, PT_DENY_ATTACH, 0, 0, 0);
         __asm__ __volatile__ (
                               "mov x0, #31\n"
@@ -143,6 +166,7 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
         }
         
         if(urlScheme) {
+            tries = 1;
             NSURL *launchURL = [NSURL URLWithString:[NSString stringWithFormat:urlScheme, NSBundle.mainBundle.bundleIdentifier]];
             UIApplication *application = [NSClassFromString(@"UIApplication") sharedApplication];
             [application openURL:launchURL options:@{} completionHandler:completionHandler];
@@ -150,7 +174,6 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
         }
     }
 
-    int tries = 2;
     _LSOpenConfiguration *configuration = [[PrivClass(_LSOpenConfiguration) alloc] init];
     if(classicMode) {
         NSMutableDictionary* dict = [NSMutableDictionary new];
@@ -159,7 +182,7 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
     }
     LSApplicationWorkspace* workspace = [PrivClass(LSApplicationWorkspace) defaultWorkspace];
     
-    for (int i = 0; i < tries; i++) {
+    for (NSUInteger i = 0; i < tries; i++) {
         [workspace openApplicationWithBundleIdentifier:NSUserDefaults.lcMainBundle.bundleIdentifier
                                          configuration:configuration
                                      completionHandler:^(BOOL success, NSError* error) {
@@ -220,15 +243,79 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
         return LCReturnToLibraryResultShowAppList;
     }
 
-    // A guest app owns this process: reset the per-instance launch state so the
-    // relaunch lands on the library, then terminate and come back.
-    LCDebugLog(@"ReturnToLibrary", @"guest running: clearing state and restarting");
-    [lcUserDefaults setObject:@"ui" forKey:@"selected"];
-    [lcUserDefaults removeObjectForKey:@"selectedContainer"];
-    [lcUserDefaults removeObjectForKey:@"launchAppUrlScheme"];
-    [lcUserDefaults setBool:NO forKey:@"LCOpenSideStore"];
-    [lcUserDefaults synchronize];
-    [self launchToGuestAppWithClassicMode:0];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        static BOOL pending;
+        if (pending) return;
+        pending = YES;
+        UIApplication *application = [NSClassFromString(@"UIApplication") sharedApplication];
+        __block id observer;
+        __block UIBackgroundTaskIdentifier task = UIBackgroundTaskInvalid;
+        void (^cancel)(void) = ^{
+            if (observer) {
+                [NSNotificationCenter.defaultCenter removeObserver:observer];
+                observer = nil;
+            }
+            pending = NO;
+            if (task != UIBackgroundTaskInvalid) {
+                UIBackgroundTaskIdentifier finishedTask = task;
+                task = UIBackgroundTaskInvalid;
+                [application endBackgroundTask:finishedTask];
+            }
+        };
+        task = [application beginBackgroundTaskWithName:@"LCReturnToLibrary" expirationHandler:^{
+            LCDebugLog(@"ReturnToLibrary", @"background time expired; keeping guest alive");
+            cancel();
+        }];
+        if (task == UIBackgroundTaskInvalid) {
+            LCDebugLog(@"ReturnToLibrary", @"background execution unavailable; return cancelled");
+            cancel();
+            return;
+        }
+        void (^didEnterBackground)(void) = ^{
+            if (!observer) return;
+            [NSNotificationCenter.defaultCenter removeObserver:observer];
+            observer = nil;
+            LCDebugLog(@"ReturnToLibrary", @"didEnterBackground received");
+            // Let the current lifecycle notification finish before scheduling the relaunch.
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (!pending || task == UIBackgroundTaskInvalid) return;
+                [NSUserDefaults.standardUserDefaults synchronize];
+                [lcUserDefaults setObject:@"ui" forKey:@"selected"];
+                [lcUserDefaults removeObjectForKey:@"selectedContainer"];
+                [lcUserDefaults removeObjectForKey:@"launchAppUrlScheme"];
+                [lcUserDefaults setBool:NO forKey:@"LCOpenSideStore"];
+                [lcUserDefaults synchronize];
+                LCDebugLog(@"ReturnToLibrary", @"background callbacks returned; requesting relaunch");
+                [self relaunchWithClassicMode:0 exitHandler:^(BOOL success) {
+                    if (!pending || task == UIBackgroundTaskInvalid) return;
+                    if (!success) { cancel(); return; }
+                    [NSUserDefaults.standardUserDefaults synchronize];
+                    [lcUserDefaults synchronize];
+                    if ([application respondsToSelector:@selector(_terminateWithStatus:)]) {
+                        LCDebugLog(@"ReturnToLibrary", @"exit method=UIKit status=0");
+                        [application _terminateWithStatus:0];
+                    } else {
+                        LCDebugLog(@"ReturnToLibrary", @"exit method=exit status=0");
+                        exit(0);
+                    }
+                }];
+            });
+        };
+        observer = [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidEnterBackgroundNotification object:application queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
+            didEnterBackground();
+        }];
+        if (application.applicationState == UIApplicationStateBackground) {
+            didEnterBackground();
+        } else {
+            LCDebugLog(@"ReturnToLibrary", @"requesting real background transition");
+            [application suspend];
+        }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            if (!observer) return;
+            LCDebugLog(@"ReturnToLibrary", @"no background notification; return cancelled");
+            cancel();
+        });
+    });
     return LCReturnToLibraryResultRestart;
 }
 
