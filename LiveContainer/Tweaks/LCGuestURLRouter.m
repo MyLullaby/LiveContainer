@@ -8,6 +8,7 @@
 static NSDictionary *returnTarget;
 static NSDate *returnDate;
 static BOOL initialURLDelivered;
+static char LCGuestContextKey, LCGuestSourceKey;
 
 static void LCGuestURLLog(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
 static void LCGuestURLLog(NSString *format, ...) {
@@ -204,9 +205,51 @@ static NSURL *LCDecodeGuestURL(NSURL *url, NSString **source) {
                          @"identifier": settings[@"LCOrignalBundleIdentifier"] ?: sourceBundle.bundleIdentifier ?: @""};
         returnDate = NSDate.date;
         *source = returnTarget[@"identifier"];
+        LCGuestURLLog(@"receive scheme=%@ source=%@ target=%@", original.scheme.lowercaseString, *source, NSUserDefaults.lcGuestAppId);
+    } else {
+        LCGuestURLLog(@"receive scheme=%@ rejected=unknown-or-stopped-source", original.scheme.lowercaseString);
+        return nil;
     }
     return original;
 }
+
+@interface UIOpenURLContext (LCGuestURLRouter)
+- (NSURL *)lc_guest_URL;
+- (UISceneOpenURLOptions *)lc_guest_options;
+@end
+
+static NSDictionary *LCGuestContextRequest(UIOpenURLContext *context) {
+    @synchronized (context) {
+        NSDictionary *cached = objc_getAssociatedObject(context, &LCGuestContextKey);
+        if (cached) return cached;
+        NSURL *url = [context lc_guest_URL];
+        if (![LCGuestURLRouter requestForURL:url]) return nil;
+        NSString *source;
+        NSURL *decoded = LCDecodeGuestURL(url, &source);
+        cached = decoded ? @{@"url": decoded, @"source": source} : @{};
+        objc_setAssociatedObject(context, &LCGuestContextKey, cached, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        return cached;
+    }
+}
+
+@implementation UIOpenURLContext (LCGuestURLRouter)
+- (NSURL *)lc_guest_URL {
+    NSDictionary *request = LCGuestContextRequest(self);
+    return request ? request[@"url"] : [self lc_guest_URL];
+}
+- (UISceneOpenURLOptions *)lc_guest_options {
+    UISceneOpenURLOptions *options = [self lc_guest_options];
+    NSDictionary *request = LCGuestContextRequest(self);
+    if (request[@"source"]) objc_setAssociatedObject(options, &LCGuestSourceKey, request[@"source"], OBJC_ASSOCIATION_COPY_NONATOMIC);
+    return options;
+}
+@end
+
+@implementation UISceneOpenURLOptions (LCGuestURLRouter)
+- (NSString *)lc_guest_sourceApplication {
+    return objc_getAssociatedObject(self, &LCGuestSourceKey) ?: [self lc_guest_sourceApplication];
+}
+@end
 
 @implementation UIApplication (LCGuestURLRouter)
 - (BOOL)lc_guest_canOpenURL:(NSURL *)url {
@@ -251,12 +294,13 @@ static NSURL *LCDecodeGuestURL(NSURL *url, NSString **source) {
     if (routing) {
         NSMutableDictionary *payload = context.payload.mutableCopy ?: [NSMutableDictionary new];
         [payload removeObjectForKey:UIApplicationLaunchOptionsURLKey];
-        if (decoded) payload[UIApplicationLaunchOptionsURLKey] = decoded.absoluteString;
+        if (decoded) payload[UIApplicationLaunchOptionsURLKey] = url.absoluteString;
         if (source) payload[UIApplicationLaunchOptionsSourceApplicationKey] = source;
         context.payload = payload;
         NSMutableSet *actions = context.actions.mutableCopy ?: [NSMutableSet new];
         for (id action in context.actions) if ([action isKindOfClass:UIOpenURLAction.class]) [actions removeObject:action];
-        if (decoded) [actions addObject:[[UIOpenURLAction alloc] initWithURL:decoded]];
+        // Keep the envelope until UIKit creates the URL context, where both URL and options are restored.
+        if (decoded) [actions addObject:[[UIOpenURLAction alloc] initWithURL:url]];
         context.actions = actions;
         if (!decoded) dispatch_async(dispatch_get_main_queue(), ^{ LCRouteError(@"目标应用状态已变化，请返回原应用重试。"); });
     }
@@ -279,7 +323,7 @@ static NSURL *LCDecodeGuestURL(NSURL *url, NSString **source) {
         NSURL *decoded = LCDecodeGuestURL(url, &source);
         if (decoded) {
             if ([url.absoluteString isEqualToString:NSUserDefaults.lcLaunchURL]) initialURLDelivered = YES;
-            [updated addObject:[[UIOpenURLAction alloc] initWithURL:decoded]];
+            [updated addObject:action];
         } else LCRouteError(@"目标应用状态已变化，请返回原应用重试。");
     }
     [self lc_guest_scene:scene didReceiveActions:updated fromTransitionContext:context];
@@ -290,7 +334,7 @@ void LCGuestURLRouterInit(void) {
     if (!NSUserDefaults.lcGuestAppId || NSUserDefaults.isSideStore) return;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        LCGuestURLLog(@"startup guest-url-r3 running-only build=%@ host=%@ guest=%@ iOS=%@ liveProcess=%d shared=%d tweakLoaderDisabled=%d", NSUserDefaults.lcMainBundle.infoDictionary[@"LCVersionInfo"], NSUserDefaults.lcAppUrlScheme, NSUserDefaults.lcGuestAppId, UIDevice.currentDevice.systemVersion, NSUserDefaults.isLiveProcess, NSUserDefaults.isSharedApp, [NSUserDefaults.guestAppInfo[@"dontLoadTweakLoader"] boolValue]);
+        LCGuestURLLog(@"startup guest-url-r4 source-context build=%@ host=%@ guest=%@ iOS=%@ liveProcess=%d shared=%d tweakLoaderDisabled=%d", NSUserDefaults.lcMainBundle.infoDictionary[@"LCVersionInfo"], NSUserDefaults.lcAppUrlScheme, NSUserDefaults.lcGuestAppId, UIDevice.currentDevice.systemVersion, NSUserDefaults.isLiveProcess, NSUserDefaults.isSharedApp, [NSUserDefaults.guestAppInfo[@"dontLoadTweakLoader"] boolValue]);
         LCGuestURLLog(@"own schemes=%@", LCSchemes(NSBundle.mainBundle.infoDictionary));
         for (NSString *root in LCGuestRoots()) {
             NSError *error;
@@ -318,6 +362,9 @@ void LCGuestURLRouterInit(void) {
             }
         }];
         for (NSArray *entry in @[
+            @[UIOpenURLContext.class, @"URL", @"lc_guest_URL"],
+            @[UIOpenURLContext.class, @"options", @"lc_guest_options"],
+            @[UISceneOpenURLOptions.class, @"sourceApplication", @"lc_guest_sourceApplication"],
             @[UIApplication.class, @"canOpenURL:", @"lc_guest_canOpenURL:"],
             @[UIApplication.class, @"openURL:", @"lc_guest_openURL:"],
             @[UIApplication.class, @"openURL:options:completionHandler:", @"lc_guest_openURL:options:completionHandler:"],
