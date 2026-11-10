@@ -39,41 +39,15 @@
 				<key>CFBundleIconName</key>
 				<string>AppIconBooks</string>
 			</dict>
-			<key>AppIconTV</key>
+			<key>AppIconCalendar</key>
 			<dict>
 				<key>CFBundleIconName</key>
-				<string>AppIconTV</string>
+				<string>AppIconCalendar</string>
 			</dict>
-			<key>AppIconiTunes</key>
+			<key>AppIconSparkles</key>
 			<dict>
 				<key>CFBundleIconName</key>
-				<string>AppIconiTunes</string>
-			</dict>
-		</dict>
-	</dict>
-	<key>CFBundleIcons~ipad</key>
-	<dict>
-		<key>CFBundlePrimaryIcon</key>
-		<dict>
-			<key>CFBundleIconName</key>
-			<string>AppIcon</string>
-		</dict>
-		<key>CFBundleAlternateIcons</key>
-		<dict>
-			<key>AppIconBooks</key>
-			<dict>
-				<key>CFBundleIconName</key>
-				<string>AppIconBooks</string>
-			</dict>
-			<key>AppIconTV</key>
-			<dict>
-				<key>CFBundleIconName</key>
-				<string>AppIconTV</string>
-			</dict>
-			<key>AppIconiTunes</key>
-			<dict>
-				<key>CFBundleIconName</key>
-				<string>AppIconiTunes</string>
+				<string>AppIconSparkles</string>
 			</dict>
 		</dict>
 	</dict>

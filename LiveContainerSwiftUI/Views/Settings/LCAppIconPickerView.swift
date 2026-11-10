@@ -14,8 +14,8 @@ struct LCAppIconPickerView: View {
     
     private let icons: [(name: String, previewImage: String, alternateIconName: String)] = [
         ("Books", "IconPreviewBooks", "AppIconBooks"),
-        ("TV", "IconPreviewTV", "AppIconTV"),
-        ("iTunes", "IconPreviewiTunes", "AppIconiTunes"),
+        ("Calendar", "IconPreviewCalendar", "AppIconCalendar"),
+        ("Sparkles", "IconPreviewSparkles", "AppIconSparkles"),
     ]
     
     var body: some View {

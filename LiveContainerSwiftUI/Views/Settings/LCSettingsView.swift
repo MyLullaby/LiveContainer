@@ -479,10 +479,10 @@ struct LCSettingsView: View {
         switch UIApplication.shared.alternateIconName {
         case "AppIconBooks":
             return "Books"
-        case "AppIconTV":
-            return "TV"
-        case "AppIconiTunes":
-            return "iTunes"
+        case "AppIconCalendar":
+            return "Calendar"
+        case "AppIconSparkles":
+            return "Sparkles"
         default:
             return "Books"
         }
