@@ -39,15 +39,15 @@
 				<key>CFBundleIconName</key>
 				<string>AppIconBooks</string>
 			</dict>
-			<key>AppIconCalendar</key>
+			<key>AppIconTV</key>
 			<dict>
 				<key>CFBundleIconName</key>
-				<string>AppIconCalendar</string>
+				<string>AppIconTV</string>
 			</dict>
-			<key>AppIconSparkles</key>
+			<key>AppIconiTunes</key>
 			<dict>
 				<key>CFBundleIconName</key>
-				<string>AppIconSparkles</string>
+				<string>AppIconiTunes</string>
 			</dict>
 		</dict>
 	</dict>

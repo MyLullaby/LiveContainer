@@ -1,7 +1,7 @@
 {
   "images" : [
     {
-      "filename" : "Sparkles-Light.png",
+      "filename" : "iTunes-Light.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -13,7 +13,7 @@
           "value" : "dark"
         }
       ],
-      "filename" : "Sparkles-Dark.png",
+      "filename" : "iTunes-Dark.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -25,7 +25,7 @@
           "value" : "tinted"
         }
       ],
-      "filename" : "Sparkles-Tinted.png",
+      "filename" : "iTunes-Tinted.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
