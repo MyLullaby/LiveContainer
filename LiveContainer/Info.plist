@@ -51,6 +51,32 @@
 			</dict>
 		</dict>
 	</dict>
+	<key>CFBundleIcons~ipad</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconName</key>
+			<string>AppIcon</string>
+		</dict>
+		<key>CFBundleAlternateIcons</key>
+		<dict>
+			<key>AppIconBooks</key>
+			<dict>
+				<key>CFBundleIconName</key>
+				<string>AppIconBooks</string>
+			</dict>
+			<key>AppIconTV</key>
+			<dict>
+				<key>CFBundleIconName</key>
+				<string>AppIconTV</string>
+			</dict>
+			<key>AppIconiTunes</key>
+			<dict>
+				<key>CFBundleIconName</key>
+				<string>AppIconiTunes</string>
+			</dict>
+		</dict>
+	</dict>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
