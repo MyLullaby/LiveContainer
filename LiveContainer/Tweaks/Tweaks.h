@@ -13,9 +13,13 @@ void LCReturnToLibraryHooksInit(void);
 void SecItemGuestHooksInit(void);
 void DyldHooksInit(bool hideLiveContainer, bool hookDlopen, uint32_t spoofSDKVersion);
 void NSFMGuestHooksInit(void);
+void NSFMGuestExtensionHooksInit(NSString *parentContainerPath);
 void NSURLSCGuestHooksInit(void);
 void initDead10ccFix(void);
 void IDFVHookInit(NSUUID* uuid);
+void NSExtensionGuestHooksInit(NSURL *appURL, NSURL *containerURL);
+int LCRunGuestExtension(NSDictionary *request, NSExtensionContext *context);
+NSString *LCPrepareGuestExtension(NSDictionary *request);
 
 @interface NSBundle(LiveContainer)
 - (instancetype)initWithPathForMainBundle:(NSString *)path;
