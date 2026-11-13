@@ -11,6 +11,7 @@ bool performHookDyldApi(const char* functionName, uint32_t adrpOffset, void** or
 void NUDGuestHooksInit(void);
 void LCReturnToLibraryHooksInit(void);
 void SecItemGuestHooksInit(void);
+void EnvironmentGuestHooksInit(bool hideLiveContainer);
 void DyldHooksInit(bool hideLiveContainer, bool hookDlopen, uint32_t spoofSDKVersion);
 void NSFMGuestHooksInit(void);
 void NSURLSCGuestHooksInit(void);

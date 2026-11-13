@@ -529,6 +529,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     
     BOOL hookDlopen = !isSideStore && !isSharedBundle && LCSharedUtils.certificatePassword && isLiveProcess;
     BOOL hideLiveContainer = !isSideStore && [guestAppInfo[@"hideLiveContainer"] ?: @YES boolValue];
+    EnvironmentGuestHooksInit(hideLiveContainer);
     DyldHooksInit(hideLiveContainer, hookDlopen, [guestAppInfo[@"spoofSDKVersion"] unsignedIntValue]);
     
     if([guestContainerInfo[@"spoofIdentifierForVendor"] boolValue]) {
