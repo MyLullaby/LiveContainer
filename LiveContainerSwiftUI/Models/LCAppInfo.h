@@ -23,6 +23,7 @@ typedef NS_ENUM(NSInteger, MultitaskSpecified){
 @property NSString* relativeBundlePath;
 @property bool isShared;
 @property bool isJITNeeded;
+@property bool helperProcessesSupport;
 @property bool classicMode;
 @property (nonatomic, readonly) NSUInteger defaultClassicMode;
 @property bool isLocked;
@@ -38,6 +39,7 @@ typedef NS_ENUM(NSInteger, MultitaskSpecified){
 @property bool fixCommonSectionAlignment;
 @property bool replayThreadInitialization;
 @property (nonatomic, readonly) NSDictionary *threadInitializationDiagnostics;
+@property bool fixBackgroundTaskIdentifiers;
 @property bool doUseLCBundleId;
 @property NSString* selectedLanguage;
 @property NSString* dataUUID;

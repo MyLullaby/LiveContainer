@@ -8,6 +8,7 @@
 #import "FoundationPrivate.h"
 #import "LCMachOUtils.h"
 #import "LCSharedUtils.h"
+#import "LCDebugLog.h"
 #import "utils.h"
 #import "../../litehook/src/litehook.h"
 #include "Tweaks.h"
@@ -16,6 +17,11 @@
 @import CloudKit;
 @import Intents;
 @import UserNotifications;
+@import UIKit;
+
+@interface UNUserNotificationCenter (LCNotificationIdentity)
+@property (nonatomic, copy) NSString *bundleIdentifier;
+@end
 
 BOOL hook_return_false(void) {
     return NO;
@@ -119,7 +125,17 @@ void NUDGuestHooksInit(void) {
     swizzleClassMethod(INVocabulary.class, @selector(sharedVocabulary),@selector(hook_sharedVocabulary));
     swizzle(INPlayMediaIntent.class, @selector(initWithMediaItems:mediaContainer:playShuffled:playbackRepeatMode:resumePlayback:playbackQueueLocation:playbackSpeed:mediaSearch:),@selector(hook_initWithMediaItems:mediaContainer:playShuffled:playbackRepeatMode:resumePlayback:playbackQueueLocation:playbackSpeed:mediaSearch:));
 
-    // 处理通知权限
+    // Set the notification identity before guest initializers, even without TweakLoader.
+    if ([NSUserDefaults.guestAppInfo[@"fixLocalNotification"] boolValue] || NSUserDefaults.isSideStore) {
+        NSString *hostIdentifier = NSUserDefaults.lcMainBundle.bundleIdentifier;
+        UNUserNotificationCenter *center = UNUserNotificationCenter.currentNotificationCenter;
+        if (hostIdentifier.length && [center respondsToSelector:@selector(setBundleIdentifier:)]) {
+            center.bundleIdentifier = hostIdentifier;
+            LCDebugLog(@"Notification", @"using host identity %@", hostIdentifier);
+        }
+    }
+
+    // Keep authorization requests and both generations of permission queries consistent.
     swizzle(UNNotificationSettings.class, @selector(authorizationStatus), @selector(hook_authorizationStatus));
     swizzle(UNNotificationSettings.class, @selector(soundSetting), @selector(hook_soundSetting));
     swizzle(UNNotificationSettings.class, @selector(badgeSetting), @selector(hook_badgeSetting));
@@ -128,6 +144,11 @@ void NUDGuestHooksInit(void) {
     swizzle(UNNotificationSettings.class, @selector(notificationCenterSetting), @selector(hook_notificationCenterSetting));
     swizzle(UNNotificationSettings.class, @selector(alertStyle), @selector(hook_alertStyle));
     swizzle(UNUserNotificationCenter.class, @selector(getNotificationSettingsWithCompletionHandler:), @selector(hook_getNotificationSettingsWithCompletionHandler:));
+    swizzle(UNUserNotificationCenter.class, @selector(requestAuthorizationWithOptions:completionHandler:), @selector(hook_requestAuthorizationWithOptions:completionHandler:));
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    swizzle(UIApplication.class, @selector(currentUserNotificationSettings), @selector(hook_currentUserNotificationSettings));
+#pragma clang diagnostic pop
 }
 
 NSArray* appleIdentifierPrefixes = @[
@@ -262,6 +283,16 @@ bool isAppleIdentifier(NSString* identifier) {
 
 @implementation UNUserNotificationCenter (hook)
 
+- (void)hook_requestAuthorizationWithOptions:(UNAuthorizationOptions)options completionHandler:(void (^)(BOOL granted, NSError *error))completionHandler {
+    [self hook_requestAuthorizationWithOptions:options completionHandler:^(BOOL granted, NSError *error) {
+        LCDebugLog(@"Notification", @"authorization options=%lu systemGranted=%d error=%@; reporting authorized to guest",
+                   (unsigned long)options, granted, error);
+        if (completionHandler) {
+            completionHandler(YES, nil);
+        }
+    }];
+}
+
 - (void)hook_getNotificationSettingsWithCompletionHandler:(void (^)(UNNotificationSettings *settings))completionHandler {
     // 调用原始方法获取真实的 settings 对象（swizzle 后 hook_ 指向原始实现）
     [self hook_getNotificationSettingsWithCompletionHandler:completionHandler];
@@ -270,6 +301,19 @@ bool isAppleIdentifier(NSString* identifier) {
 }
 
 @end
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+@implementation UIApplication (LCNotificationPermissions)
+
+- (UIUserNotificationSettings *)hook_currentUserNotificationSettings {
+    UIUserNotificationSettings *settings = [self hook_currentUserNotificationSettings];
+    return [UIUserNotificationSettings settingsForTypes:UIUserNotificationTypeAlert | UIUserNotificationTypeBadge | UIUserNotificationTypeSound
+                                            categories:settings.categories];
+}
+
+@end
+#pragma clang diagnostic pop
 
 @implementation UNNotificationSettings (hook)
 

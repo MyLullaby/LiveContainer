@@ -9,8 +9,9 @@ import SwiftUI
 
 struct LCHelpView : View {
     @Binding var isPresent : Bool
+    @State private var helpURL = URL(string: "https://livecontainer.github.io/docs/faq")!
+    @State private var showFAQ = false
 
-    
     var body: some View {
         NavigationView {
             ScrollView {
@@ -20,6 +21,9 @@ struct LCHelpView : View {
                     Text("lc.helpView.text2")
                     Text("")
                     Text("lc.helpView.returnToLibraryGesture")
+                    Button("FAQ") {
+                        showFAQ = true
+                    }
                 }
                 .padding()
             }
@@ -32,6 +36,9 @@ struct LCHelpView : View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showFAQ) {
+            SafariView(url: $helpURL)
         }
     }
 }
