@@ -214,8 +214,6 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				BackgroundTasks.m,
-				DocumentPicker.m,
-				Notification.m,
 				TweakLoader.m,
 				"UIKit+GuestHooks.m",
 			);
@@ -1258,7 +1256,6 @@
 				OTHER_LDFLAGS = (
 					"-Wl,-U,_OBJC_CLASS_$_FBSSceneParameters",
 					"-Wl,-U,_OBJC_CLASS_$_LSApplicationWorkspace",
-					"-Wl,-U,_OBJC_CLASS_$_DOCConfiguration",
 				);
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1282,7 +1279,6 @@
 				OTHER_LDFLAGS = (
 					"-Wl,-U,_OBJC_CLASS_$_FBSSceneParameters",
 					"-Wl,-U,_OBJC_CLASS_$_LSApplicationWorkspace",
-					"-Wl,-U,_OBJC_CLASS_$_DOCConfiguration",
 				);
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;

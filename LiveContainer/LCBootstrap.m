@@ -582,6 +582,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     // hook NSUserDefault before running libraries' initializers
     LCDebugLog(@"Launch", @"begin build=%@ iOS=%@ liveProcess=%d shared=%d sideStore=%d hideLC=%d tweakLoaderDisabled=%d", lcMainBundle.infoDictionary[@"LCVersionInfo"], NSProcessInfo.processInfo.operatingSystemVersionString, isLiveProcess, isSharedBundle, isSideStore, [guestAppInfo[@"hideLiveContainer"] ?: @YES boolValue], [guestAppInfo[@"dontLoadTweakLoader"] ?: @YES boolValue]);
     NUDGuestHooksInit();
+    LCDocumentPickerHooksInit();
     LCReturnToLibraryHooksInit();
     LCGuestURLRouterInit();
     if (!isLiveProcess && [guestAppInfo[@"helperProcessesSupport"] boolValue]) {

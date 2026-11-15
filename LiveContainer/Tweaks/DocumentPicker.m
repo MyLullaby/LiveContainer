@@ -1,27 +1,47 @@
 @import UniformTypeIdentifiers;
 #import "LCSharedUtils.h"
 #import "UIKitPrivate.h"
-#import "../LiveContainer/utils.h"
-#import "../LiveContainer/FoundationPrivate.h"
+#import "utils.h"
+#import "FoundationPrivate.h"
+#import "Tweaks.h"
+#import "LCDebugLog.h"
 
-BOOL fixFilePicker;
-__attribute__((constructor))
-static void NSFMGuestHooksInit() {
+@interface LCDocumentPickerHostHooks : NSObject
+- (void)lc_setDocumentPickerHostIdentifier:(NSString *)identifier;
+@end
+
+static BOOL fixFilePicker;
+
+void LCDocumentPickerHooksInit(void) {
     if(!NSUserDefaults.lcGuestAppId) return;
-    fixFilePicker = [NSUserDefaults.guestAppInfo[@"doSymlinkInbox"] boolValue];
-    
-    swizzle(UIDocumentPickerViewController.class, @selector(initForOpeningContentTypes:asCopy:), @selector(hook_initForOpeningContentTypes:asCopy:));
-    swizzle(UIDocumentPickerViewController.class, @selector(initWithDocumentTypes:inMode:), @selector(hook_initWithDocumentTypes:inMode:));
-    swizzle(UIDocumentBrowserViewController.class, @selector(initForOpeningContentTypes:), @selector(hook_initForOpeningContentTypes));
-    swizzleClassMethod(UTType.class, @selector(typeWithIdentifier:), @selector(hook_typeWithIdentifier:));
-    if (fixFilePicker) {
-        swizzle(NSURL.class, @selector(startAccessingSecurityScopedResource), @selector(hook_startAccessingSecurityScopedResource));
-        swizzle(UIDocumentPickerViewController.class, @selector(setAllowsMultipleSelection:), @selector(hook_setAllowsMultipleSelection:));
-    }
-    if ([NSUserDefaults.guestAppInfo[@"fixFilePickerNew"] boolValue] || NSUserDefaults.isSideStore) {
-        swizzle(DOCConfiguration.class, @selector(setHostIdentifier:), @selector(hook_setHostIdentifier:));
-    }
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        fixFilePicker = [NSUserDefaults.guestAppInfo[@"doSymlinkInbox"] boolValue];
+        BOOL fixHostIdentity = [NSUserDefaults.guestAppInfo[@"fixFilePickerNew"] boolValue] || NSUserDefaults.isSideStore;
+        BOOL hostHookInstalled = NO;
 
+        swizzle(UIDocumentPickerViewController.class, @selector(initForOpeningContentTypes:asCopy:), @selector(hook_initForOpeningContentTypes:asCopy:));
+        swizzle(UIDocumentPickerViewController.class, @selector(initWithDocumentTypes:inMode:), @selector(hook_initWithDocumentTypes:inMode:));
+        swizzle(UIDocumentBrowserViewController.class, @selector(initForOpeningContentTypes:), @selector(hook_initForOpeningContentTypes:));
+        swizzleClassMethod(UTType.class, @selector(typeWithIdentifier:), @selector(hook_typeWithIdentifier:));
+        if (fixFilePicker) {
+            swizzle(NSURL.class, @selector(startAccessingSecurityScopedResource), @selector(hook_startAccessingSecurityScopedResource));
+            swizzle(UIDocumentPickerViewController.class, @selector(setAllowsMultipleSelection:), @selector(hook_setAllowsMultipleSelection:));
+        }
+        if (fixHostIdentity) {
+            // Resolve the private class at launch rather than binding it when LC loads.
+            Class configurationClass = NSClassFromString(@"DOCConfiguration");
+            Method original = class_getInstanceMethod(configurationClass, @selector(setHostIdentifier:));
+            Method replacement = class_getInstanceMethod(LCDocumentPickerHostHooks.class, @selector(lc_setDocumentPickerHostIdentifier:));
+            if (original && class_addMethod(configurationClass, @selector(lc_setDocumentPickerHostIdentifier:),
+                                            method_getImplementation(replacement), method_getTypeEncoding(replacement))) {
+                swizzle(configurationClass, @selector(setHostIdentifier:), @selector(lc_setDocumentPickerHostIdentifier:));
+                hostHookInstalled = YES;
+            }
+        }
+        LCDebugLog(@"DocumentPicker", @"core hooks installed inbox=%d hostFix=%d hostHookInstalled=%d",
+                   fixFilePicker, fixHostIdentity, hostHookInstalled);
+    });
 }
 
 @implementation UIDocumentPickerViewController(LiveContainerHook)
@@ -100,9 +120,9 @@ static void NSFMGuestHooksInit() {
 @end
 
 
-@implementation DOCConfiguration(LiveContainerHook)
+@implementation LCDocumentPickerHostHooks
 
-- (void)hook_setHostIdentifier:(NSString *)ignored {
+- (void)lc_setDocumentPickerHostIdentifier:(NSString *)ignored {
     CFErrorRef error = NULL;
     void* taskSelf = SecTaskCreateFromSelf(NULL);
     CFTypeRef value = SecTaskCopyValueForEntitlement(taskSelf, CFSTR("application-identifier"), &error);
@@ -113,14 +133,14 @@ static void NSFMGuestHooksInit() {
         NSRange dotRange = [entStr rangeOfString:@"."];
         if (dotRange.location != NSNotFound) {
                NSString *result = [entStr substringFromIndex:dotRange.location + 1];
-            [self hook_setHostIdentifier:result];
+            [self lc_setDocumentPickerHostIdentifier:result];
         } else {
-            [self hook_setHostIdentifier:entStr];
+            [self lc_setDocumentPickerHostIdentifier:entStr];
         }
     } else if (error) {
         NSLog(@"Error fetching entitlement: %@", error);
         CFRelease(error);
-        [self hook_setHostIdentifier:ignored];
+        [self lc_setDocumentPickerHostIdentifier:ignored];
     }
 }
 
