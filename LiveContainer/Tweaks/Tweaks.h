@@ -12,6 +12,7 @@ void NUDGuestHooksInit(void);
 void LCDocumentPickerHooksInit(void);
 void LCReturnToLibraryHooksInit(void);
 void SecItemGuestHooksInit(void);
+BOOL LCManagedKeychainHooksInit(NSString *bundlePath, NSString *containerPath);
 void DyldHooksInit(bool hideLiveContainer, bool hookDlopen, uint32_t spoofSDKVersion);
 void NSFMGuestHooksInit(void);
 void NSFMGuestExtensionHooksInit(NSString *parentContainerPath);

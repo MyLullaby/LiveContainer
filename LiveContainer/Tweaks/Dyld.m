@@ -210,6 +210,12 @@ void* hook_dlsym(void * __handle, const char * __symbol) {
         for(int i = 0; i < gRebindCount; i++) {
             global_rebind rebind = gRebinds[i];
             if(ans == rebind.replacee) {
+                if (rebind.exceptionFilter) {
+                    Dl_info caller = {};
+                    if (!dladdr(__builtin_return_address(0), &caller) ||
+                        !caller.dli_fbase || caller.dli_fbase == rebind.sourceHeader ||
+                        !rebind.exceptionFilter(caller.dli_fbase)) continue;
+                }
                 return rebind.replacement;
             }
         }

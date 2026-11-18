@@ -10,7 +10,9 @@
 #import <CommonCrypto/CommonDigest.h>
 #import "../../litehook/src/litehook.h"
 #import "LCSharedUtils.h"
-#import "LCKeychainShadow.h"
+#import "LCManagedKeychain.h"
+#import "LCDebugLog.h"
+#include <dlfcn.h>
 
 extern void* (*msHookFunction)(void *symbol, void *hook, void **old);
 OSStatus (*orig_SecItemAdd)(CFDictionaryRef attributes, CFTypeRef *result) = SecItemAdd;
@@ -25,15 +27,66 @@ OSStatus (*orig_SecKeyGeneratePair)(CFDictionaryRef query, SecKeyRef *publicKey,
 #pragma clang diagnostic pop
 NSString* accessGroup = nil;
 NSString* containerId = nil;
-static LCKeychainShadow *keychainShadow;
 
-static OSStatus LCObserveKeychain(NSString *operation, NSDictionary *query, NSDictionary *updates,
-                                 CFTypeRef *result, OSStatus (^call)(BOOL *fallback)) {
-    if (keychainShadow) {
-        return [keychainShadow performOperation:operation query:query updates:updates result:result call:call];
+static NSURL *managedKeychainDirectory;
+static NSString *managedKeychainBundleRoot;
+
+static bool LCManagedKeychainGuestImage(const mach_header_u *header) {
+    Dl_info info = {};
+    if (!dladdr(header, &info) || !info.dli_fname) return false;
+    NSString *path = [@(info.dli_fname) stringByResolvingSymlinksInPath];
+    return [path hasPrefix:managedKeychainBundleRoot];
+}
+
+static OSStatus LCManagedAdd(CFDictionaryRef input, CFTypeRef *result) {
+    return LCManagedKeychainPerform(managedKeychainDirectory, LCKeychainAdd, input, NULL, result);
+}
+
+static OSStatus LCManagedCopy(CFDictionaryRef input, CFTypeRef *result) {
+    return LCManagedKeychainPerform(managedKeychainDirectory, LCKeychainCopy, input, NULL, result);
+}
+
+static OSStatus LCManagedUpdate(CFDictionaryRef input, CFDictionaryRef updates) {
+    return LCManagedKeychainPerform(managedKeychainDirectory, LCKeychainUpdate, input, updates, NULL);
+}
+
+static OSStatus LCManagedDelete(CFDictionaryRef input) {
+    return LCManagedKeychainPerform(managedKeychainDirectory, LCKeychainDelete, input, NULL, NULL);
+}
+
+static SecKeyRef LCManagedRandomKey(CFDictionaryRef parameters, CFErrorRef *error) {
+    return LCManagedCreateRandomKey(managedKeychainDirectory, parameters, error);
+}
+
+static OSStatus LCManagedKeyPair(CFDictionaryRef parameters, SecKeyRef *publicKey, SecKeyRef *privateKey) {
+    return LCManagedGenerateKeyPair(managedKeychainDirectory, parameters, publicKey, privateKey);
+}
+
+BOOL LCManagedKeychainHooksInit(NSString *bundlePath, NSString *containerPath) {
+    if (!bundlePath.isAbsolutePath || !containerPath.isAbsolutePath) {
+        LCKeychainLogMessage(@"init", @"none", errSecParam, @"invalid-guest-path");
+        return NO;
     }
-    BOOL fallback = NO;
-    return call(&fallback);
+    managedKeychainBundleRoot = [bundlePath.stringByResolvingSymlinksInPath stringByAppendingString:@"/"];
+    managedKeychainDirectory = [NSURL fileURLWithPath:[containerPath stringByAppendingPathComponent:@"Library/LCManagedKeychain"] isDirectory:YES];
+
+    // Only redirect imports from the guest bundle, not LC or OS frameworks.
+    uint32_t before = gRebindCount;
+    litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, SecItemAdd, LCManagedAdd, LCManagedKeychainGuestImage);
+    litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, SecItemCopyMatching, LCManagedCopy, LCManagedKeychainGuestImage);
+    litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, SecItemUpdate, LCManagedUpdate, LCManagedKeychainGuestImage);
+    litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, SecItemDelete, LCManagedDelete, LCManagedKeychainGuestImage);
+    litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, SecKeyCreateRandomKey, LCManagedRandomKey, LCManagedKeychainGuestImage);
+    litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, SecKeyCreateWithData, LCManagedCreateKeyWithData, LCManagedKeychainGuestImage);
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, SecKeyGeneratePair, LCManagedKeyPair, LCManagedKeychainGuestImage);
+#pragma clang diagnostic pop
+    if (gRebindCount - before != 7) {
+        LCKeychainLogMessage(@"init", @"none", errSecNotAvailable, @"hook-registration-failed");
+        return NO;
+    }
+    return YES;
 }
 
 OSStatus new_SecItemAdd(CFDictionaryRef attributes, CFTypeRef *result) {
@@ -42,27 +95,24 @@ OSStatus new_SecItemAdd(CFDictionaryRef attributes, CFTypeRef *result) {
     // for keychain deletion in LCUI
     attributesCopy[@"alis"] = containerId;
     
-    return LCObserveKeychain(@"add", attributesCopy, nil, result, ^OSStatus(BOOL *fallback) {
-        OSStatus status = orig_SecItemAdd((__bridge CFDictionaryRef)attributesCopy, result);
-        if (status == errSecParam) {
-            *fallback = YES;
-            return orig_SecItemAdd(attributes, result);
-        }
-        return status;
-    });
+    OSStatus status = orig_SecItemAdd((__bridge CFDictionaryRef)attributesCopy, result);
+    if(status == errSecParam) {
+        return orig_SecItemAdd(attributes, result);
+    }
+
+    return status;
 }
 
 OSStatus new_SecItemCopyMatching(CFDictionaryRef query, CFTypeRef *result) {
     NSMutableDictionary *queryCopy = ((__bridge NSDictionary *)query).mutableCopy;
     queryCopy[(__bridge id)kSecAttrAccessGroup] = accessGroup;
-    return LCObserveKeychain(@"copy", queryCopy, nil, result, ^OSStatus(BOOL *fallback) {
-        OSStatus status = orig_SecItemCopyMatching((__bridge CFDictionaryRef)queryCopy, result);
-        if (status == errSecParam) {
-            *fallback = YES;
-            return orig_SecItemCopyMatching(query, result);
-        }
-        return status;
-    });
+    OSStatus status = orig_SecItemCopyMatching((__bridge CFDictionaryRef)queryCopy, result);
+    if(status == errSecParam) {
+        // if this search don't support kSecAttrAccessGroup, we just use the original search
+        return orig_SecItemCopyMatching(query, result);
+    }
+
+    return status;
 }
 
 OSStatus new_SecItemUpdate(CFDictionaryRef query, CFDictionaryRef attributesToUpdate) {
@@ -72,31 +122,27 @@ OSStatus new_SecItemUpdate(CFDictionaryRef query, CFDictionaryRef attributesToUp
     NSMutableDictionary *attrCopy = ((__bridge NSDictionary *)attributesToUpdate).mutableCopy;
     attrCopy[(__bridge id)kSecAttrAccessGroup] = accessGroup;
 
-    return LCObserveKeychain(@"update", queryCopy, attrCopy, NULL, ^OSStatus(BOOL *fallback) {
-        OSStatus status = orig_SecItemUpdate((__bridge CFDictionaryRef)queryCopy, (__bridge CFDictionaryRef)attrCopy);
-        if (status == errSecParam) {
-            *fallback = YES;
-            return orig_SecItemUpdate(query, attributesToUpdate);
-        }
-        return status;
-    });
+    OSStatus status = orig_SecItemUpdate((__bridge CFDictionaryRef)queryCopy, (__bridge CFDictionaryRef)attrCopy);
+
+    if(status == errSecParam) {
+        return orig_SecItemUpdate(query, attributesToUpdate);
+    }
+
+    return status;
 }
 
 OSStatus new_SecItemDelete(CFDictionaryRef query){
     NSMutableDictionary *queryCopy = ((__bridge NSDictionary *)query).mutableCopy;
     queryCopy[(__bridge id)kSecAttrAccessGroup] = accessGroup;
-    return LCObserveKeychain(@"delete", queryCopy, nil, NULL, ^OSStatus(BOOL *fallback) {
-        OSStatus status = orig_SecItemDelete((__bridge CFDictionaryRef)queryCopy);
-        if (status == errSecParam) {
-            *fallback = YES;
-            return orig_SecItemDelete(query);
-        }
-        return status;
-    });
+    OSStatus status = orig_SecItemDelete((__bridge CFDictionaryRef)queryCopy);
+    if(status == errSecParam) {
+        return orig_SecItemDelete(query);
+    }
+
+    return status;
 }
 
 SecKeyRef new_SecKeyCreateRandomKey(CFDictionaryRef parameters, CFErrorRef *error) {
-    [keychainShadow recordUnsupportedOperation:@"SecKeyCreateRandomKey"];
     NSMutableDictionary *paramsCopy = ((__bridge NSDictionary *)parameters).mutableCopy;
     paramsCopy[(__bridge id)kSecAttrAccessGroup] = accessGroup;
     SecKeyRef key = orig_SecKeyCreateRandomKey((__bridge CFDictionaryRef)paramsCopy, error);
@@ -110,7 +156,6 @@ SecKeyRef new_SecKeyCreateRandomKey(CFDictionaryRef parameters, CFErrorRef *erro
 }
 
 SecKeyRef new_SecKeyCreateWithData(CFDataRef keyData, CFDictionaryRef parameters, CFErrorRef *error) {
-    [keychainShadow recordUnsupportedOperation:@"SecKeyCreateWithData"];
     NSMutableDictionary *paramsCopy = ((__bridge NSDictionary *)parameters).mutableCopy;
     paramsCopy[(__bridge id)kSecAttrAccessGroup] = accessGroup;
     SecKeyRef key = orig_SecKeyCreateWithData(keyData, (__bridge CFDictionaryRef)paramsCopy, error);
@@ -124,7 +169,6 @@ SecKeyRef new_SecKeyCreateWithData(CFDataRef keyData, CFDictionaryRef parameters
 }
 
 OSStatus new_SecKeyGeneratePair(CFDictionaryRef parameters, SecKeyRef *publicKey, SecKeyRef *privateKey) {
-    [keychainShadow recordUnsupportedOperation:@"SecKeyGeneratePair"];
     NSMutableDictionary *queryCopy = ((__bridge NSDictionary *)parameters).mutableCopy;
     queryCopy[(__bridge id)kSecAttrAccessGroup] = accessGroup;
     OSStatus status = orig_SecKeyGeneratePair((__bridge CFDictionaryRef)queryCopy, publicKey, privateKey);
@@ -160,11 +204,6 @@ void SecItemGuestHooksInit(void)  {
     if(status == errSecMissingEntitlement) {
         NSLog(@"[LC] failed to access keychain access group %@", accessGroup);
         return;
-    }
-
-    if ([NSUserDefaults.lcSharedDefaults boolForKey:@"LCKeychainShadowEnabled"]) {
-        keychainShadow = [[LCKeychainShadow alloc] initWithHome:[NSString stringWithUTF8String:getenv("HOME")]
-                                                  accessGroup:accessGroup];
     }
     
     litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, SecItemAdd, new_SecItemAdd, nil);
