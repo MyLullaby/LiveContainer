@@ -8,6 +8,10 @@ typedef NS_ENUM(NSUInteger, LCKeychainOperation) {
 OSStatus LCManagedKeychainPerform(NSURL *directory, LCKeychainOperation operation,
                                   CFDictionaryRef input, CFDictionaryRef updates, CFTypeRef *result);
 
+typedef NSMutableDictionary *(^LCKeychainLegacyRead)(NSDictionary *attributes);
+OSStatus LCManagedKeychainPerformWithLegacyRead(NSURL *directory, LCKeychainOperation operation,
+    CFDictionaryRef input, CFDictionaryRef updates, CFTypeRef *result, LCKeychainLegacyRead legacyRead);
+
 SecKeyRef LCManagedCreateRandomKey(NSURL *directory, CFDictionaryRef parameters, CFErrorRef *error) CF_RETURNS_RETAINED;
 SecKeyRef LCManagedCreateKeyWithData(CFDataRef data, CFDictionaryRef parameters, CFErrorRef *error) CF_RETURNS_RETAINED;
 OSStatus LCManagedGenerateKeyPair(NSURL *directory, CFDictionaryRef parameters, SecKeyRef *publicKey, SecKeyRef *privateKey);

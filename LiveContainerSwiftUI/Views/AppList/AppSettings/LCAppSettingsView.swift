@@ -67,7 +67,7 @@ struct LCAppSettingsView: View {
                         .disabled(model.isAppRunning || model.isSigningInProgress)
                     NavigationLink("LC 钥匙串诊断") { LCKeychainLogView() }
                 } footer: {
-                    Text("下次完整启动生效。关闭时使用系统钥匙串；开启后使用容器内的独立存储，不迁移已有凭据或回退系统。不支持的操作会返回错误并自动记日志。切换后可能需要重新登录；LC 存储的保护不等同于系统钥匙串。")
+                    Text("下次完整启动生效。关闭时使用系统钥匙串；开启后只写 LC 存储。符合条件的旧密码仅在本地查不到时尝试从系统读取，导入时回读校验。不弹出认证，不向系统写入。诊断日志不记录凭据。LC 存储的保护不等同于系统钥匙串。")
                 }
             }
             Section {
