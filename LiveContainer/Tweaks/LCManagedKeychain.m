@@ -104,7 +104,16 @@ static OSStatus LCValidateTemporaryKeyOptions(id input, BOOL allowKeyDictionarie
             }
             *reason = @"unsupported-key-attributes-dictionary";
         } else if ([key isEqual:KC(kSecAttrTokenID)]) {
-            *reason = @"token-backed-key";
+            if (![value isKindOfClass:NSString.class] || ![value length]) {
+                *reason = @"invalid-token-id";
+                return errSecParam;
+            }
+            if ([value isEqual:KC(kSecAttrTokenIDSecureEnclave)]) {
+                // TODO: Support Secure Enclave keys without downgrading to software.
+                *reason = @"secure-enclave-token";
+            } else {
+                *reason = @"unsupported-token-id";
+            }
         } else if ([key isEqual:KC(kSecAttrAccessControl)] || [key isEqual:KC(kSecAttrAccessible)] ||
                    [key isEqual:KC(kSecUseAuthenticationContext)]) {
             *reason = @"protected-key";
