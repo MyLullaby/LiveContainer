@@ -293,6 +293,9 @@ NSString *LCPrepareGuestExtension(NSDictionary *request) {
     *_CFGetProcessPath() = executablePath;
     overwriteExecPath(executablePath);
     NUDGuestHooksInit();
+    if ([guestAppInfo[@"useLCKeychain"] boolValue] && !LCManagedKeychainHooksInit(appPath, homePath)) {
+        return @"Unable to install LC keychain hooks for the guest extension.";
+    }
     NSFMGuestExtensionHooksInit(request[@"parentContainerPath"]);
     NSURLSCGuestHooksInit();
 
@@ -588,7 +591,11 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
         NSExtensionGuestHooksInit(appBundle.bundleURL, [NSURL fileURLWithPath:newHomePath isDirectory:YES]);
     }
     if(!isSideStore) {
-        SecItemGuestHooksInit();
+        if ([guestAppInfo[@"useLCKeychain"] boolValue]) {
+            if (!LCManagedKeychainHooksInit(bundlePath, newHomePath)) return @"Unable to install LC keychain hooks.";
+        } else {
+            SecItemGuestHooksInit();
+        }
         NSFMGuestHooksInit();
         initDead10ccFix();
     }

@@ -31,6 +31,7 @@ typedef NS_ENUM(NSInteger, MultitaskSpecified){
 @property bool doSymlinkInbox;
 @property bool hideLiveContainer;
 @property bool dontLoadTweakLoader;
+@property bool useLCKeychain;
 @property bool dontInjectTweakLoader;
 @property LCOrientationLock orientationLock;
 @property MultitaskSpecified multitaskSpecified;

@@ -10,6 +10,9 @@
 #import <CommonCrypto/CommonDigest.h>
 #import "../../litehook/src/litehook.h"
 #import "LCSharedUtils.h"
+#import "LCManagedKeychain.h"
+#import "LCDebugLog.h"
+#include <dlfcn.h>
 
 extern void* (*msHookFunction)(void *symbol, void *hook, void **old);
 OSStatus (*orig_SecItemAdd)(CFDictionaryRef attributes, CFTypeRef *result) = SecItemAdd;
@@ -24,6 +27,67 @@ OSStatus (*orig_SecKeyGeneratePair)(CFDictionaryRef query, SecKeyRef *publicKey,
 #pragma clang diagnostic pop
 NSString* accessGroup = nil;
 NSString* containerId = nil;
+
+static NSURL *managedKeychainDirectory;
+static NSString *managedKeychainBundleRoot;
+
+static bool LCManagedKeychainGuestImage(const mach_header_u *header) {
+    Dl_info info = {};
+    if (!dladdr(header, &info) || !info.dli_fname) return false;
+    NSString *path = [@(info.dli_fname) stringByResolvingSymlinksInPath];
+    return [path hasPrefix:managedKeychainBundleRoot];
+}
+
+static OSStatus LCManagedAdd(CFDictionaryRef input, CFTypeRef *result) {
+    return LCManagedKeychainPerform(managedKeychainDirectory, LCKeychainAdd, input, NULL, result);
+}
+
+static OSStatus LCManagedCopy(CFDictionaryRef input, CFTypeRef *result) {
+    return LCManagedKeychainPerform(managedKeychainDirectory, LCKeychainCopy, input, NULL, result);
+}
+
+static OSStatus LCManagedUpdate(CFDictionaryRef input, CFDictionaryRef updates) {
+    return LCManagedKeychainPerform(managedKeychainDirectory, LCKeychainUpdate, input, updates, NULL);
+}
+
+static OSStatus LCManagedDelete(CFDictionaryRef input) {
+    return LCManagedKeychainPerform(managedKeychainDirectory, LCKeychainDelete, input, NULL, NULL);
+}
+
+static SecKeyRef LCManagedRandomKey(CFDictionaryRef parameters, CFErrorRef *error) {
+    return LCManagedCreateRandomKey(managedKeychainDirectory, parameters, error);
+}
+
+static OSStatus LCManagedKeyPair(CFDictionaryRef parameters, SecKeyRef *publicKey, SecKeyRef *privateKey) {
+    return LCManagedGenerateKeyPair(managedKeychainDirectory, parameters, publicKey, privateKey);
+}
+
+BOOL LCManagedKeychainHooksInit(NSString *bundlePath, NSString *containerPath) {
+    if (!bundlePath.isAbsolutePath || !containerPath.isAbsolutePath) {
+        LCKeychainLogMessage(@"init", @"none", errSecParam, @"invalid-guest-path");
+        return NO;
+    }
+    managedKeychainBundleRoot = [bundlePath.stringByResolvingSymlinksInPath stringByAppendingString:@"/"];
+    managedKeychainDirectory = [NSURL fileURLWithPath:[containerPath stringByAppendingPathComponent:@"Library/LCManagedKeychain"] isDirectory:YES];
+
+    // Only redirect imports from the guest bundle, not LC or OS frameworks.
+    uint32_t before = gRebindCount;
+    litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, SecItemAdd, LCManagedAdd, LCManagedKeychainGuestImage);
+    litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, SecItemCopyMatching, LCManagedCopy, LCManagedKeychainGuestImage);
+    litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, SecItemUpdate, LCManagedUpdate, LCManagedKeychainGuestImage);
+    litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, SecItemDelete, LCManagedDelete, LCManagedKeychainGuestImage);
+    litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, SecKeyCreateRandomKey, LCManagedRandomKey, LCManagedKeychainGuestImage);
+    litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, SecKeyCreateWithData, LCManagedCreateKeyWithData, LCManagedKeychainGuestImage);
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, SecKeyGeneratePair, LCManagedKeyPair, LCManagedKeychainGuestImage);
+#pragma clang diagnostic pop
+    if (gRebindCount - before != 7) {
+        LCKeychainLogMessage(@"init", @"none", errSecNotAvailable, @"hook-registration-failed");
+        return NO;
+    }
+    return YES;
+}
 
 OSStatus new_SecItemAdd(CFDictionaryRef attributes, CFTypeRef *result) {
     NSMutableDictionary *attributesCopy = ((__bridge NSDictionary *)attributes).mutableCopy;
