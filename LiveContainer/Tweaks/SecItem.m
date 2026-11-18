@@ -10,6 +10,7 @@
 #import <CommonCrypto/CommonDigest.h>
 #import "../../litehook/src/litehook.h"
 #import "LCSharedUtils.h"
+#import "LCKeychainShadow.h"
 
 extern void* (*msHookFunction)(void *symbol, void *hook, void **old);
 OSStatus (*orig_SecItemAdd)(CFDictionaryRef attributes, CFTypeRef *result) = SecItemAdd;
@@ -24,6 +25,16 @@ OSStatus (*orig_SecKeyGeneratePair)(CFDictionaryRef query, SecKeyRef *publicKey,
 #pragma clang diagnostic pop
 NSString* accessGroup = nil;
 NSString* containerId = nil;
+static LCKeychainShadow *keychainShadow;
+
+static OSStatus LCObserveKeychain(NSString *operation, NSDictionary *query, NSDictionary *updates,
+                                 CFTypeRef *result, OSStatus (^call)(BOOL *fallback)) {
+    if (keychainShadow) {
+        return [keychainShadow performOperation:operation query:query updates:updates result:result call:call];
+    }
+    BOOL fallback = NO;
+    return call(&fallback);
+}
 
 OSStatus new_SecItemAdd(CFDictionaryRef attributes, CFTypeRef *result) {
     NSMutableDictionary *attributesCopy = ((__bridge NSDictionary *)attributes).mutableCopy;
@@ -31,24 +42,27 @@ OSStatus new_SecItemAdd(CFDictionaryRef attributes, CFTypeRef *result) {
     // for keychain deletion in LCUI
     attributesCopy[@"alis"] = containerId;
     
-    OSStatus status = orig_SecItemAdd((__bridge CFDictionaryRef)attributesCopy, result);
-    if(status == errSecParam) {
-        return orig_SecItemAdd(attributes, result);
-    }
-    
-    return status;
+    return LCObserveKeychain(@"add", attributesCopy, nil, result, ^OSStatus(BOOL *fallback) {
+        OSStatus status = orig_SecItemAdd((__bridge CFDictionaryRef)attributesCopy, result);
+        if (status == errSecParam) {
+            *fallback = YES;
+            return orig_SecItemAdd(attributes, result);
+        }
+        return status;
+    });
 }
 
 OSStatus new_SecItemCopyMatching(CFDictionaryRef query, CFTypeRef *result) {
     NSMutableDictionary *queryCopy = ((__bridge NSDictionary *)query).mutableCopy;
     queryCopy[(__bridge id)kSecAttrAccessGroup] = accessGroup;
-    OSStatus status = orig_SecItemCopyMatching((__bridge CFDictionaryRef)queryCopy, result);
-    if(status == errSecParam) {
-        // if this search don't support kSecAttrAccessGroup, we just use the original search
-        return orig_SecItemCopyMatching(query, result);
-    }
-    
-    return status;
+    return LCObserveKeychain(@"copy", queryCopy, nil, result, ^OSStatus(BOOL *fallback) {
+        OSStatus status = orig_SecItemCopyMatching((__bridge CFDictionaryRef)queryCopy, result);
+        if (status == errSecParam) {
+            *fallback = YES;
+            return orig_SecItemCopyMatching(query, result);
+        }
+        return status;
+    });
 }
 
 OSStatus new_SecItemUpdate(CFDictionaryRef query, CFDictionaryRef attributesToUpdate) {
@@ -58,27 +72,31 @@ OSStatus new_SecItemUpdate(CFDictionaryRef query, CFDictionaryRef attributesToUp
     NSMutableDictionary *attrCopy = ((__bridge NSDictionary *)attributesToUpdate).mutableCopy;
     attrCopy[(__bridge id)kSecAttrAccessGroup] = accessGroup;
 
-    OSStatus status = orig_SecItemUpdate((__bridge CFDictionaryRef)queryCopy, (__bridge CFDictionaryRef)attrCopy);
-
-    if(status == errSecParam) {
-        return orig_SecItemUpdate(query, attributesToUpdate);
-    }
-    
-    return status;
+    return LCObserveKeychain(@"update", queryCopy, attrCopy, NULL, ^OSStatus(BOOL *fallback) {
+        OSStatus status = orig_SecItemUpdate((__bridge CFDictionaryRef)queryCopy, (__bridge CFDictionaryRef)attrCopy);
+        if (status == errSecParam) {
+            *fallback = YES;
+            return orig_SecItemUpdate(query, attributesToUpdate);
+        }
+        return status;
+    });
 }
 
 OSStatus new_SecItemDelete(CFDictionaryRef query){
     NSMutableDictionary *queryCopy = ((__bridge NSDictionary *)query).mutableCopy;
     queryCopy[(__bridge id)kSecAttrAccessGroup] = accessGroup;
-    OSStatus status = orig_SecItemDelete((__bridge CFDictionaryRef)queryCopy);
-    if(status == errSecParam) {
-        return orig_SecItemDelete(query);
-    }
-    
-    return status;
+    return LCObserveKeychain(@"delete", queryCopy, nil, NULL, ^OSStatus(BOOL *fallback) {
+        OSStatus status = orig_SecItemDelete((__bridge CFDictionaryRef)queryCopy);
+        if (status == errSecParam) {
+            *fallback = YES;
+            return orig_SecItemDelete(query);
+        }
+        return status;
+    });
 }
 
 SecKeyRef new_SecKeyCreateRandomKey(CFDictionaryRef parameters, CFErrorRef *error) {
+    [keychainShadow recordUnsupportedOperation:@"SecKeyCreateRandomKey"];
     NSMutableDictionary *paramsCopy = ((__bridge NSDictionary *)parameters).mutableCopy;
     paramsCopy[(__bridge id)kSecAttrAccessGroup] = accessGroup;
     SecKeyRef key = orig_SecKeyCreateRandomKey((__bridge CFDictionaryRef)paramsCopy, error);
@@ -92,6 +110,7 @@ SecKeyRef new_SecKeyCreateRandomKey(CFDictionaryRef parameters, CFErrorRef *erro
 }
 
 SecKeyRef new_SecKeyCreateWithData(CFDataRef keyData, CFDictionaryRef parameters, CFErrorRef *error) {
+    [keychainShadow recordUnsupportedOperation:@"SecKeyCreateWithData"];
     NSMutableDictionary *paramsCopy = ((__bridge NSDictionary *)parameters).mutableCopy;
     paramsCopy[(__bridge id)kSecAttrAccessGroup] = accessGroup;
     SecKeyRef key = orig_SecKeyCreateWithData(keyData, (__bridge CFDictionaryRef)paramsCopy, error);
@@ -105,6 +124,7 @@ SecKeyRef new_SecKeyCreateWithData(CFDataRef keyData, CFDictionaryRef parameters
 }
 
 OSStatus new_SecKeyGeneratePair(CFDictionaryRef parameters, SecKeyRef *publicKey, SecKeyRef *privateKey) {
+    [keychainShadow recordUnsupportedOperation:@"SecKeyGeneratePair"];
     NSMutableDictionary *queryCopy = ((__bridge NSDictionary *)parameters).mutableCopy;
     queryCopy[(__bridge id)kSecAttrAccessGroup] = accessGroup;
     OSStatus status = orig_SecKeyGeneratePair((__bridge CFDictionaryRef)queryCopy, publicKey, privateKey);
@@ -140,6 +160,11 @@ void SecItemGuestHooksInit(void)  {
     if(status == errSecMissingEntitlement) {
         NSLog(@"[LC] failed to access keychain access group %@", accessGroup);
         return;
+    }
+
+    if ([NSUserDefaults.lcSharedDefaults boolForKey:@"LCKeychainShadowEnabled"]) {
+        keychainShadow = [[LCKeychainShadow alloc] initWithHome:[NSString stringWithUTF8String:getenv("HOME")]
+                                                  accessGroup:accessGroup];
     }
     
     litehook_rebind_symbol(LITEHOOK_REBIND_GLOBAL, SecItemAdd, new_SecItemAdd, nil);

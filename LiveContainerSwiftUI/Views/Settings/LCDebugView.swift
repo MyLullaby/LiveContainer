@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 struct LCDebugView: View {
+    @AppStorage("LCKeychainShadowEnabled", store: LCUtils.appGroupUserDefault) private var keychainShadowEnabled = false
     @State private var enabled = LCDebugLog.isEnabled()
     @State private var logs = ""
     @State private var error = ""
@@ -21,6 +22,13 @@ struct LCDebugView: View {
             }))
             .padding(.horizontal)
             Text("开启后集中记录 LC1、LC2、LC3 和多任务中的启动、应用间跳转与返回列表日志。复现启动问题前，请先开启并重启相关 Guest App。日志最多保留约 4 MB，超出后清理较早记录。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+            Toggle("钥匙串影子验证（实验）", isOn: $keychainShadowEnabled)
+                .disabled(!enabled)
+                .padding(.horizontal)
+            Text("需开启 Debug 并重启 Guest App。系统仍提供真实结果；普通密码/token 的可识别条目会加密保存在各自数据目录的 Library/LCKeychainShadow，后续读取时先比较再导入。日志不包含密码或 token；未完整导入及不支持的请求会单独标记。此模式有额外磁盘开销，排查结束后请关闭并重启 Guest。关闭或清空日志不会删除影子数据，影子目录及其中的密钥暂不属于正式迁移格式。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal)
