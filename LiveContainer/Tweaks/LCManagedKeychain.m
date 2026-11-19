@@ -11,7 +11,7 @@
 #define KC(key) ((__bridge NSString *)key)
 static NSString *const LCKeychainRecordRef = @"lc-ref";
 static const NSUInteger LCKeychainMaxBytes = 8 * 1024 * 1024;
-static char LCKeychainSoftwareImportMarker;
+static char LCKeychainOwnedSoftwareKeyMarker;
 
 static NSArray *LCKeychainKeyUsageAttributes(void) {
     static NSArray *attributes;
@@ -190,7 +190,7 @@ SecKeyRef LCManagedCreateKeyWithData(CFDataRef data, CFDictionaryRef parameters,
     BOOL softwareToken = input && LCKeychainTokenRequest(input);
     SecKeyRef key = LCManagedCreateTemporaryKey(@"SecKeyCreateWithData", YES, data, softwareToken, parameters, error);
     // Security can report a memory-only import as permanent. Track the exact object, not its key material.
-    if (key && !softwareToken) objc_setAssociatedObject((__bridge id)key, &LCKeychainSoftwareImportMarker, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (key && !softwareToken) objc_setAssociatedObject((__bridge id)key, &LCKeychainOwnedSoftwareKeyMarker, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     return key;
 }
 
@@ -271,7 +271,9 @@ static SecKeyRef LCKeychainRestoreKey(NSDictionary *item) CF_RETURNS_RETAINED {
     if (!LCKeychainSoftwareKey(item)) return NULL;
     NSDictionary *parameters = @{KC(kSecAttrKeyType): item[KC(kSecAttrKeyType)],
         KC(kSecAttrKeyClass): item[KC(kSecAttrKeyClass)], KC(kSecAttrIsPermanent): @NO};
-    return SecKeyCreateWithData((__bridge CFDataRef)item[KC(kSecValueData)], (__bridge CFDictionaryRef)parameters, NULL);
+    SecKeyRef key = SecKeyCreateWithData((__bridge CFDataRef)item[KC(kSecValueData)], (__bridge CFDictionaryRef)parameters, NULL);
+    if (key) objc_setAssociatedObject((__bridge id)key, &LCKeychainOwnedSoftwareKeyMarker, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return key;
 }
 
 static OSStatus LCKeychainPrepareKey(NSMutableDictionary *record, id reference, BOOL identityImport, NSString **reason) {
@@ -286,7 +288,7 @@ static OSStatus LCKeychainPrepareKey(NSMutableDictionary *record, id reference, 
     }
     NSDictionary *actual = CFBridgingRelease(SecKeyCopyAttributes(key));
     NSData *data = nil;
-    // Memory-only imports can still report their software key as permanent.
+    // Memory-only software keys can still report themselves as permanent.
     NSString *rejection = nil;
     if (!actual) rejection = @"key-attributes-unavailable";
     else if (actual[KC(kSecAttrTokenID)]) rejection = @"key-token-backed";
@@ -294,7 +296,7 @@ static OSStatus LCKeychainPrepareKey(NSMutableDictionary *record, id reference, 
     else if ([actual[KC(kSecAttrIsExtractable)] isEqual:@NO]) rejection = @"key-not-extractable";
     else if (!LCKeychainSoftwareKey(actual)) rejection = @"unsupported-key-type-or-class";
     else if (reference && !identityImport && [actual[KC(kSecAttrIsPermanent)] boolValue] &&
-             !objc_getAssociatedObject(reference, &LCKeychainSoftwareImportMarker)) rejection = @"untracked-permanent-key-reference";
+             !objc_getAssociatedObject(reference, &LCKeychainOwnedSoftwareKeyMarker)) rejection = @"untracked-permanent-key-reference";
     else {
         data = CFBridgingRelease(SecKeyCopyExternalRepresentation(key, NULL));
         if (!data.length) rejection = @"key-export-failed";
@@ -690,6 +692,7 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
     attributes[KC(kSecClass)] = itemClass;
     BOOL returnData = NO, returnAttributes = NO, returnRef = NO, returnPersistentRef = NO;
     BOOL passwordItem = !keyItem && !certificateItem;
+    BOOL genericPassword = [itemClass isEqual:KC(kSecClassGenericPassword)];
     BOOL localPasswordRead = passwordItem && operation == LCKeychainCopy;
     BOOL allowLegacyRead = YES;
     id valueReference = nil;
@@ -702,6 +705,9 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
         id value = options[key];
         if ([key isEqual:KC(kSecReturnData)] || [key isEqual:KC(kSecReturnAttributes)] ||
             [key isEqual:KC(kSecReturnRef)] || [key isEqual:KC(kSecReturnPersistentRef)]) {
+            // SecItemDelete has no result; a redundant password return flag is not a selector.
+            if (passwordItem && operation == LCKeychainDelete && [key isEqual:KC(kSecReturnAttributes)] &&
+                LCKeychainIsBoolean(value)) continue;
             if ((operation != LCKeychainCopy && operation != LCKeychainAdd) || !LCKeychainIsBoolean(value)) return fail(errSecParam, LCKeychainSafeOption(key, value, types));
             if (![value boolValue]) continue;
             if ([key isEqual:KC(kSecReturnData)] && !identityItem) returnData = YES;
@@ -770,6 +776,11 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
             } else return fail(errSecParam, @"unsupported-match-limit");
         } else if ((certificateItem || keyItem) && [key isEqual:KC(kSecValueRef)]) {
             valueReference = value;
+        } else if (genericPassword && [key isEqual:KC(kSecAttrGeneric)] && [value isKindOfClass:NSString.class]) {
+            NSData *genericData = [value dataUsingEncoding:NSUTF8StringEncoding];
+            if (!genericData) return fail(errSecParam, @"invalid-generic-string-encoding");
+            attributes[key] = genericData;
+            allowLegacyRead = NO;
         } else if ((operation == LCKeychainAdd && [key isEqual:KC(kSecValueData)] && [value isKindOfClass:NSData.class]) ||
                    LCKeychainValidAttribute(key, value, types, operation != LCKeychainAdd)) {
             attributes[key] = value;
@@ -849,6 +860,14 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
     NSDictionary *changes = (__bridge NSDictionary *)updates;
     if (operation == LCKeychainUpdate) {
         if (![changes isKindOfClass:NSDictionary.class] || !changes.count) return fail(errSecParam, @"invalid-update");
+        id genericValue = changes[KC(kSecAttrGeneric)];
+        if (genericPassword && [genericValue isKindOfClass:NSString.class]) {
+            NSData *genericData = [genericValue dataUsingEncoding:NSUTF8StringEncoding];
+            if (!genericData) return fail(errSecParam, @"invalid-generic-string-encoding");
+            NSMutableDictionary *normalized = changes.mutableCopy;
+            normalized[KC(kSecAttrGeneric)] = genericData;
+            changes = normalized;
+        }
         for (NSString *key in changes) {
             id value = changes[key];
             if (certificateItem && ![key isEqual:KC(kSecAttrLabel)] && ![key isEqual:KC(kSecAttrAccessible)]) {
@@ -1252,9 +1271,12 @@ static SecKeyRef LCManagedGenerateSoftwareKey(NSURL *directory, NSString *operat
     SecKeyRef private = LCManagedCreateTemporaryKey(operation, NO, NULL, softwareToken, (__bridge CFDictionaryRef)crypto, error);
     if (!private) return NULL;
 
+    // Mark keys at creation so callers can also persist them in a later SecItemAdd.
+    objc_setAssociatedObject((__bridge id)private, &LCKeychainOwnedSoftwareKeyMarker, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     NSDictionary *privateRecord = LCKeychainGenerationRecord(stored[0], stored[1], private);
     id shouldStorePublic = stored[2][KC(kSecAttrIsPermanent)] ?: stored[0][KC(kSecAttrIsPermanent)];
     SecKeyRef public = (publicKey || [shouldStorePublic boolValue]) ? SecKeyCopyPublicKey(private) : NULL;
+    if (public) objc_setAssociatedObject((__bridge id)public, &LCKeychainOwnedSoftwareKeyMarker, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     if ((publicKey || [shouldStorePublic boolValue]) && !public) {
         status = errSecInternalComponent; reason = @"temporary-public-key-unavailable";
     } else if (privateRecord || [shouldStorePublic boolValue]) {
