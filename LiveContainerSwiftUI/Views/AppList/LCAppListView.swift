@@ -742,6 +742,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         } else {
             // enable SDK version spoof by defalut
             finalNewApp.spoofSDKVersion = true
+            finalNewApp.useLCKeychain = true
         }
         finalNewApp.installationDate = Date.now
         finalNewApp.relativeBundlePath = appRelativePath
