@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct LCKeychainLogView: View {
     @State private var logs = ""
@@ -19,6 +20,13 @@ struct LCKeychainLogView: View {
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 Button("刷新") { reload() }
+                Button {
+                    UIPasteboard.general.string = logs
+                } label: {
+                    Label("复制全部日志", systemImage: "doc.on.doc")
+                        .labelStyle(.iconOnly)
+                }
+                .disabled(logs.isEmpty)
                 Button("分享") { showingShare = true }.disabled(logs.isEmpty)
                 Button("清空", role: .destructive) {
                     clearFailed = !LCDebugLog.clearKeychainLogs()

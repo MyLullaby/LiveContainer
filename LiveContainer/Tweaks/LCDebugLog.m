@@ -1,6 +1,7 @@
 #import "LCDebugLog.h"
 #import "LCSharedUtils.h"
 #import "utils.h"
+#import <Security/SecBase.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/file.h>
@@ -131,6 +132,7 @@ void LCDebugLogMessage(NSString *category, NSString *format, ...) {
 }
 
 void LCKeychainLogMessage(NSString *operation, NSString *itemClass, int status, NSString *reason) {
+    if (status == errSecSuccess || status == errSecItemNotFound) return;
     LCAppendLog(@"keychain.log", @"LCKeychain",
                 [NSString stringWithFormat:@"op=%@ class=%@ status=%d reason=%@", operation, itemClass, status, reason], NO);
 }
