@@ -691,6 +691,13 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
         } else if ([key isEqual:KC(kSecUseDataProtectionKeychain)]) {
             // LC has one guest-local store; this iOS option does not select another store.
             if (!LCKeychainIsBoolean(value)) return fail(errSecParam, LCKeychainSafeOption(key));
+        } else if ([key isEqual:KC(kSecAttrCreationDate)] || [key isEqual:KC(kSecAttrModificationDate)]) {
+            if (!localPasswordRead || ![value isKindOfClass:NSDate.class]) {
+                return fail(errSecParam, @"invalid-password-date-selector");
+            }
+            // Dates returned by LC describe its local record, not a system record.
+            attributes[key] = value;
+            allowLegacyRead = NO;
         } else if ([key isEqual:KC(kSecValuePersistentRef)] || [key isEqual:KC(kSecMatchItemList)]) {
             continue; // Validated as a group before interpreting the other options.
         } else if ([key isEqual:KC(kSecMatchEmailAddressIfPresent)]) {
