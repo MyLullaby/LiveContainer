@@ -104,7 +104,6 @@ static OSStatus LCValidateTemporaryKeyOptions(id input, BOOL allowKeyDictionarie
                 continue;
             }
             *reason = @"unsupported-key-attributes-dictionary";
-        // A token request is emulated as an exportable software key; the managed store cannot hold hardware-bound keys.
         } else if ([key isEqual:KC(kSecAttrTokenID)]) {
             if (![value isKindOfClass:NSString.class] || ![value length]) {
                 *reason = @"invalid-token-id";
@@ -140,14 +139,25 @@ static OSStatus LCKeyCreationErrorStatus(CFErrorRef error) {
         (OSStatus)CFErrorGetCode(error) : errSecInternalComponent;
 }
 
+static NSString *LCKeychainFailureReason(NSString *reason, BOOL softwareToken) {
+    return softwareToken && ![reason hasPrefix:@"token-"] ? [@"token-" stringByAppendingString:reason] : reason;
+}
+
+static BOOL LCKeychainTokenRequest(NSDictionary *parameters) {
+    if (parameters[KC(kSecAttrTokenID)]) return YES;
+    for (NSString *key in @[KC(kSecPrivateKeyAttrs), KC(kSecPublicKeyAttrs)]) {
+        NSDictionary *child = parameters[key];
+        if ([child isKindOfClass:NSDictionary.class] && child[KC(kSecAttrTokenID)]) return YES;
+    }
+    return NO;
+}
+
 static SecKeyRef LCManagedCreateTemporaryKey(NSString *operation, BOOL import, CFDataRef data,
-                                            CFDictionaryRef parameters, CFErrorRef *error) {
+                                            BOOL softwareToken, CFDictionaryRef parameters, CFErrorRef *error) {
     if (error) *error = NULL;
     NSString *reason = nil;
     NSDictionary *validated = nil;
     OSStatus status;
-    BOOL softwareToken = [(__bridge id)parameters isKindOfClass:NSDictionary.class] &&
-        ((__bridge NSDictionary *)parameters)[KC(kSecAttrTokenID)] != nil;
     if (import && ![(__bridge id)data isKindOfClass:NSData.class]) {
         status = errSecParam;
         reason = @"invalid-key-data";
@@ -155,7 +165,7 @@ static SecKeyRef LCManagedCreateTemporaryKey(NSString *operation, BOOL import, C
         status = LCValidateTemporaryKeyOptions((__bridge id)parameters, !import, softwareToken, &validated, &reason);
     }
     if (status != errSecSuccess) {
-        LCKeychainLogMessage(operation, @"key", status, reason);
+        LCKeychainLogMessage(operation, @"key", status, LCKeychainFailureReason(reason, softwareToken));
         if (error) *error = CFErrorCreate(NULL, kCFErrorDomainOSStatus, status, NULL);
         return NULL;
     }
@@ -166,15 +176,16 @@ static SecKeyRef LCManagedCreateTemporaryKey(NSString *operation, BOOL import, C
         SecKeyCreateRandomKey(safeParameters, &systemError);
     if (!key) LCKeychainLogMessage(operation, @"key", LCKeyCreationErrorStatus(systemError),
         softwareToken ? @"token-temporary-key-create-failed" : @"temporary-key-create-failed");
-    else if (softwareToken) LCKeychainLogMessage(operation, @"key", errSecSuccess,
-        import ? @"token-key-import-software-emulated" : @"token-key-create-software-emulated");
+    else if (softwareToken && import) LCKeychainLogMessage(operation, @"key", errSecSuccess, @"token-key-import-software-emulated");
     if (error) *error = systemError;
     else if (systemError) CFRelease(systemError);
     return key;
 }
 
 SecKeyRef LCManagedCreateKeyWithData(CFDataRef data, CFDictionaryRef parameters, CFErrorRef *error) {
-    return LCManagedCreateTemporaryKey(@"SecKeyCreateWithData", YES, data, parameters, error);
+    NSDictionary *input = [(__bridge id)parameters isKindOfClass:NSDictionary.class] ? (__bridge NSDictionary *)parameters : nil;
+    BOOL softwareToken = input && LCKeychainTokenRequest(input);
+    return LCManagedCreateTemporaryKey(@"SecKeyCreateWithData", YES, data, softwareToken, parameters, error);
 }
 
 static BOOL LCKeychainValidAttribute(NSString *key, id value, NSDictionary *types, BOOL query) {
@@ -922,10 +933,15 @@ static SecKeyRef LCManagedGenerateSoftwareKey(NSURL *directory, NSString *operat
     NSMutableArray *native = [NSMutableArray arrayWithCapacity:3], *stored = [NSMutableArray arrayWithCapacity:3];
     OSStatus status = options ? errSecSuccess : errSecParam;
     NSString *reason = @"invalid-key-parameters";
-    id token = options[KC(kSecAttrTokenID)];
-    BOOL softwareToken = token != nil;
-    if (softwareToken && (![token isKindOfClass:NSString.class] || ![token length])) {
-        status = errSecParam; reason = @"invalid-token-id";
+    BOOL softwareToken = options && LCKeychainTokenRequest(options);
+    if (softwareToken) {
+        for (id location in locations) {
+            id token = [location isKindOfClass:NSDictionary.class] ? location[KC(kSecAttrTokenID)] : nil;
+            if (token && (![token isKindOfClass:NSString.class] || ![token length])) {
+                status = errSecParam; reason = @"invalid-token-id";
+                break;
+            }
+        }
     }
     for (id location in locations) {
         if (status != errSecSuccess) break;
@@ -961,15 +977,14 @@ static SecKeyRef LCManagedGenerateSoftwareKey(NSURL *directory, NSString *operat
         [stored addObject:record.copy];
     }
     if (status != errSecSuccess) {
-        LCKeychainLogMessage(operation, @"key", status, reason);
+        LCKeychainLogMessage(operation, @"key", status, LCKeychainFailureReason(reason, softwareToken));
         if (error) *error = CFErrorCreate(NULL, kCFErrorDomainOSStatus, status, NULL);
         return NULL;
     }
-    if (softwareToken) LCKeychainLogMessage(operation, @"key", errSecSuccess, @"token-key-generation-software-emulated");
     NSMutableDictionary *crypto = [native[0] mutableCopy];
     if (privateOptions) crypto[KC(kSecPrivateKeyAttrs)] = native[1];
     if (publicOptions) crypto[KC(kSecPublicKeyAttrs)] = native[2];
-    SecKeyRef private = LCManagedCreateTemporaryKey(operation, NO, NULL, (__bridge CFDictionaryRef)crypto, error);
+    SecKeyRef private = LCManagedCreateTemporaryKey(operation, NO, NULL, softwareToken, (__bridge CFDictionaryRef)crypto, error);
     if (!private) return NULL;
 
     NSDictionary *privateRecord = LCKeychainGenerationRecord(stored[0], stored[1], private);
@@ -984,11 +999,12 @@ static SecKeyRef LCManagedGenerateSoftwareKey(NSURL *directory, NSString *operat
             id reference = second[KC(kSecValueRef)];
             [second removeObjectForKey:KC(kSecValueRef)];
             status = LCKeychainPrepareKey(second, reference, NO);
+            if (status != errSecSuccess) reason = softwareToken ? @"token-key-preparation-failed" : @"key-preparation-failed";
         }
         if (status == errSecSuccess) {
             status = LCKeychainPerform(directory, LCKeychainAdd, (__bridge CFDictionaryRef)(privateRecord ?: publicRecord), NULL, NULL, second, nil);
+            if (status != errSecSuccess) reason = softwareToken ? @"token-persistent-key-store-failed" : @"persistent-key-store-failed";
         }
-        reason = softwareToken ? @"token-persistent-key-store-failed" : @"persistent-key-store-failed";
     }
     if (status != errSecSuccess) {
         if (public) CFRelease(public);
@@ -999,6 +1015,7 @@ static SecKeyRef LCManagedGenerateSoftwareKey(NSURL *directory, NSString *operat
     }
     if (publicKey) *publicKey = public;
     else if (public) CFRelease(public);
+    if (softwareToken) LCKeychainLogMessage(operation, @"key", errSecSuccess, @"token-key-generation-software-emulated");
     return private;
 }
 
