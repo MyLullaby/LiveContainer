@@ -2,6 +2,7 @@
 #import "LCDebugLog.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -439,9 +440,16 @@ static BOOL LCKeychainMatches(NSDictionary *item, NSDictionary *key, NSDictionar
     return YES;
 }
 
-static NSData *LCKeychainReadStore(NSURL *file, OSStatus *status, NSString **reason) {
+static BOOL LCKeychainAfterFirstUnlock(NSDictionary *item) {
+    NSString *protection = item[KC(kSecAttrAccessible)];
+    return [protection isEqual:KC(kSecAttrAccessibleAfterFirstUnlock)] ||
+        [protection isEqual:KC(kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly)];
+}
+
+static NSData *LCKeychainReadStore(NSURL *file, OSStatus *status, NSString **reason, BOOL *denied) {
     int fd = open(file.fileSystemRepresentation, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
     if (fd < 0) {
+        if (denied) *denied = errno == EACCES || errno == EPERM;
         if (errno != ENOENT) { *status = errSecNotAvailable; *reason = @"store-open"; }
         return nil;
     }
@@ -457,6 +465,7 @@ static NSData *LCKeychainReadStore(NSURL *file, OSStatus *status, NSString **rea
     while (offset < data.length) {
         ssize_t count = read(fd, bytes + offset, data.length - offset);
         if (count < 0 && errno == EINTR) continue;
+        if (count < 0 && denied) *denied = errno == EACCES || errno == EPERM;
         if (count <= 0) break;
         offset += (NSUInteger)count;
     }
@@ -464,6 +473,58 @@ static NSData *LCKeychainReadStore(NSURL *file, OSStatus *status, NSString **rea
     if (offset == data.length) return data;
     *status = errSecNotAvailable; *reason = @"store-read";
     return nil;
+}
+
+static OSStatus LCKeychainWriteStore(NSURL *store, NSArray *items, NSArray *blocked, BOOL replace,
+                                     NSString **reason) {
+    NSMutableArray *unlocked = [NSMutableArray array], *afterFirstUnlock = [NSMutableArray array];
+    for (NSDictionary *item in items) {
+        NSDictionary *record = item;
+        if (!record[LCKeychainRecordRef]) {
+            NSMutableDictionary *withRef = item.mutableCopy;
+            withRef[LCKeychainRecordRef] = LCKeychainNewRef(item[KC(kSecClass)]);
+            record = withRef;
+        }
+        [(LCKeychainAfterFirstUnlock(item) ? afterFirstUnlock : unlocked) addObject:record];
+    }
+    NSArray *documents = @[@{@"items": unlocked, @"legacy-blocked": blocked}, afterFirstUnlock];
+    NSMutableArray<NSData *> *encoded = [NSMutableArray arrayWithCapacity:2];
+    NSUInteger total = 0;
+    for (id document in documents) {
+        NSData *data = [NSPropertyListSerialization dataWithPropertyList:document
+            format:NSPropertyListBinaryFormat_v1_0 options:0 error:nil];
+        if (!data || data.length > LCKeychainMaxBytes - total) {
+            *reason = @"store-size-or-encode";
+            return errSecAllocate;
+        }
+        total += data.length;
+        [encoded addObject:data];
+    }
+
+    NSURL *parent = store.URLByDeletingLastPathComponent;
+    char *temporaryPath = strdup([parent URLByAppendingPathComponent:@"items-v2.XXXXXX"].fileSystemRepresentation);
+    if (!temporaryPath || !mkdtemp(temporaryPath)) {
+        free(temporaryPath);
+        *reason = @"store-staging";
+        return errSecNotAvailable;
+    }
+    NSURL *temporary = [NSURL fileURLWithFileSystemRepresentation:temporaryPath isDirectory:YES relativeToURL:nil];
+    NSDataWritingOptions unlockedOptions = 0, afterFirstUnlockOptions = 0;
+#if TARGET_OS_IPHONE
+    afterFirstUnlockOptions = NSDataWritingFileProtectionCompleteUntilFirstUserAuthentication;
+    unlockedOptions = unlocked.count || blocked.count ? NSDataWritingFileProtectionComplete : afterFirstUnlockOptions;
+#endif
+    BOOL committed = [encoded[0] writeToURL:[temporary URLByAppendingPathComponent:@"unlocked.plist"]
+                                   options:unlockedOptions error:nil] &&
+        [encoded[1] writeToURL:[temporary URLByAppendingPathComponent:@"after-first-unlock.plist"]
+                       options:afterFirstUnlockOptions error:nil] &&
+        renameatx_np(AT_FDCWD, temporaryPath, AT_FDCWD, store.fileSystemRepresentation,
+                     replace ? RENAME_SWAP : RENAME_EXCL) == 0;
+    [NSFileManager.defaultManager removeItemAtURL:temporary error:nil];
+    free(temporaryPath);
+    if (committed) return errSecSuccess;
+    *reason = @"store-write";
+    return errSecNotAvailable;
 }
 
 static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operation, CFDictionaryRef input,
@@ -659,9 +720,23 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
     NSDictionary *defaults = (keyItem || certificateItem) ? @{KC(kSecAttrSynchronizable): @NO} : LCKeychainPasswordDefaults(itemClass);
     NSDictionary *imported = nil;
     do {
-        NSURL *file = [directory URLByAppendingPathComponent:@"items-v1.plist"];
-        NSData *data = LCKeychainReadStore(file, &status, &reason);
+        NSURL *legacyFile = [directory URLByAppendingPathComponent:@"items-v1.plist"];
+        NSURL *store = [directory URLByAppendingPathComponent:@"items-v2" isDirectory:YES];
+        NSURL *unlockedFile = [store URLByAppendingPathComponent:@"unlocked.plist"];
+        NSURL *afterFirstUnlockFile = [store URLByAppendingPathComponent:@"after-first-unlock.plist"];
+        struct stat storeInfo;
+        BOOL splitStore = lstat(store.fileSystemRepresentation, &storeInfo) == 0;
+        if ((splitStore && !S_ISDIR(storeInfo.st_mode)) || (!splitStore && errno != ENOENT)) {
+            status = errSecNotAvailable; reason = @"store-directory"; break;
+        }
+        BOOL unlockedDenied = NO;
+        NSData *data = LCKeychainReadStore(splitStore ? unlockedFile : legacyFile, &status, &reason, &unlockedDenied);
+        BOOL partialRead = splitStore && unlockedDenied && operation == LCKeychainCopy;
+        if (partialRead) status = errSecSuccess;
         if (status != errSecSuccess) break;
+        if (splitStore && !data && !partialRead) {
+            status = errSecDecode; reason = @"store-missing-unlocked"; break;
+        }
         id decoded = data ? [NSPropertyListSerialization propertyListWithData:data options:0 format:nil error:nil] : @[];
         BOOL hasMetadata = [decoded isKindOfClass:NSDictionary.class];
         NSArray *existing = hasMetadata ? decoded[@"items"] : decoded;
@@ -687,8 +762,22 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
             if (status != errSecSuccess) break;
         }
         if (status != errSecSuccess) { reason = @"store-invalid-legacy-filters"; break; }
+        if (splitStore) {
+            NSData *afterData = LCKeychainReadStore(afterFirstUnlockFile, &status, &reason, NULL);
+            if (status != errSecSuccess) break;
+            id afterItems = afterData ? [NSPropertyListSerialization propertyListWithData:afterData
+                options:0 format:nil error:nil] : nil;
+            if (![afterItems isKindOfClass:NSArray.class]) {
+                status = errSecDecode; reason = @"store-invalid-after-first-unlock"; break;
+            }
+            existing = [existing arrayByAddingObjectsFromArray:afterItems];
+            if (!LCKeychainValidStore(existing)) {
+                status = errSecDecode; reason = @"store-invalid-records"; break;
+            }
+        }
         NSMutableArray *items = existing.mutableCopy;
         NSMutableArray *legacyBlocked = blocked.mutableCopy;
+        BOOL migrate = !splitStore && data != nil;
         BOOL dirty = NO;
         if (operation == LCKeychainAdd) {
             NSDate *now = NSDate.date;
@@ -752,7 +841,7 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
                 [matches addIndex:index];
                 *stop = matches.count == matchLimit;
             }];
-            if (!matches.count && legacyRead && passwordItem && operation == LCKeychainCopy &&
+            if (!partialRead && !matches.count && legacyRead && passwordItem && operation == LCKeychainCopy &&
                 matchLimit == 1 && !persistentInput && !requestsSync && !attributes[KC(kSecAttrAccessGroup)] &&
                 attributes[KC(kSecAttrAccount)] && (attributes[KC(kSecAttrService)] || attributes[KC(kSecAttrServer)])) {
                 BOOL blockedQuery = NO;
@@ -803,7 +892,8 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
             }
             if (passwordItem && !requestsSync && !attributes[KC(kSecAttrAccessGroup)] &&
                 (operation == LCKeychainDelete || (operation == LCKeychainUpdate && matches.count))) {
-                if (operation == LCKeychainDelete && !persistentInput && ![legacyBlocked containsObject:attributes]) {
+                if (operation == LCKeychainDelete && matchLimit == NSUIntegerMax &&
+                    !persistentInput && ![legacyBlocked containsObject:attributes]) {
                     [legacyBlocked addObject:attributes.copy];
                     dirty = YES;
                 }
@@ -819,6 +909,9 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
                 }];
             }
             if (!matches.count) {
+                if (partialRead) {
+                    status = errSecInteractionNotAllowed; reason = @"store-locked"; break;
+                }
                 status = errSecItemNotFound; reason = @"item-not-found";
                 if (!dirty) break;
             }
@@ -828,11 +921,15 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
                     if (returnPersistentRef) {
                         for (NSUInteger index = matches.firstIndex; index != NSNotFound; index = [matches indexGreaterThanIndex:index]) {
                             if (items[index][LCKeychainRecordRef]) continue;
+                            if (partialRead) {
+                                status = errSecInteractionNotAllowed; reason = @"store-locked"; break;
+                            }
                             NSMutableDictionary *item = [items[index] mutableCopy];
                             item[LCKeychainRecordRef] = LCKeychainNewRef(itemClass);
                             items[index] = item;
                             dirty = YES;
                         }
+                        if (status != errSecSuccess) break;
                     }
                     [matches enumerateIndexesUsingBlock:^(NSUInteger index, BOOL *stop) {
                         id value = LCKeychainResult(items[index], matchedKeys[@(index)], defaults, returnData, returnAttributes, returnRef, returnPersistentRef);
@@ -842,7 +939,7 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
                     if (results.count != matches.count) { status = errSecDecode; reason = @"reference-restore-failed"; break; }
                     output = matchLimit == 1 ? results.firstObject : results.copy;
                 }
-                if (!dirty) break;
+                if (!dirty && !migrate) break;
             } else if (operation == LCKeychainDelete) {
                 // An identity delete removes its certificate, not a possibly shared private key.
                 [items removeObjectsAtIndexes:matches];
@@ -859,30 +956,21 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
         if (!LCKeychainValidStore(items)) {
             status = errSecDuplicateItem; reason = @"duplicate-item"; break;
         }
-        id document = legacyBlocked.count ? @{ @"items": items, @"legacy-blocked": legacyBlocked } : items;
-        NSData *encoded = [NSPropertyListSerialization dataWithPropertyList:document format:NSPropertyListBinaryFormat_v1_0 options:0 error:nil];
-        if (!encoded || encoded.length > LCKeychainMaxBytes) {
-            status = errSecAllocate; reason = @"store-size-or-encode"; break;
-        }
-        NSDataWritingOptions writeOptions = NSDataWritingAtomic;
-#if TARGET_OS_IPHONE
-        // A shared file must use the strictest protection of its records.
-        BOOL afterFirstUnlock = items.count > 0;
-        for (NSDictionary *item in items) {
-            NSString *protection = item[KC(kSecAttrAccessible)];
-            if (![protection isEqual:KC(kSecAttrAccessibleAfterFirstUnlock)] &&
-                ![protection isEqual:KC(kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly)]) {
-                afterFirstUnlock = NO;
-                break;
+        OSStatus writeStatus = LCKeychainWriteStore(store, items, legacyBlocked, splitStore, &reason);
+        if (writeStatus != errSecSuccess) {
+            if (migrate && !dirty && operation == LCKeychainCopy) {
+                LCKeychainLogMessage(op, className, writeStatus, reason);
+            } else {
+                status = writeStatus;
             }
+            break;
         }
-        writeOptions |= afterFirstUnlock ? NSDataWritingFileProtectionCompleteUntilFirstUserAuthentication : NSDataWritingFileProtectionComplete;
-#endif
-        if (![encoded writeToURL:file options:writeOptions error:nil]) {
-            status = errSecNotAvailable; reason = @"store-write"; break;
+        if (migrate && unlink(legacyFile.fileSystemRepresentation) != 0) {
+            LCKeychainLogMessage(op, className, errSecNotAvailable, @"store-v1-cleanup");
         }
         if (imported) {
-            NSData *readBack = LCKeychainReadStore(file, &status, &reason);
+            NSURL *importedFile = LCKeychainAfterFirstUnlock(imported) ? afterFirstUnlockFile : unlockedFile;
+            NSData *readBack = LCKeychainReadStore(importedFile, &status, &reason, NULL);
             if (!readBack) {
                 if (status == errSecSuccess) status = errSecNotAvailable;
                 reason = @"legacy-import-readback-failed";
