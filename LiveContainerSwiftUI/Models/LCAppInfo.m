@@ -622,6 +622,15 @@
     }
 }
 
+- (bool)useLCKeychain {
+    return [_info[@"useLCKeychain"] boolValue];
+}
+
+- (void)setUseLCKeychain:(bool)enabled {
+    _info[@"useLCKeychain"] = @(enabled);
+    [self save];
+}
+
 - (bool)replayThreadInitialization {
     return [_info[@"replayThreadInitialization"] boolValue];
 }

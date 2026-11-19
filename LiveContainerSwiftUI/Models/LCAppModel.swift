@@ -77,6 +77,9 @@ class LCAppModel: ObservableObject, Hashable {
             appInfo.replayThreadInitialization = uiReplayThreadInitialization
         }
     }
+    @Published var uiUseLCKeychain: Bool {
+        didSet { appInfo.useLCKeychain = uiUseLCKeychain }
+    }
     @Published var uiFixBackgroundTaskIdentifiers : Bool {
         didSet {
             appInfo.fixBackgroundTaskIdentifiers = uiFixBackgroundTaskIdentifiers
@@ -205,6 +208,7 @@ class LCAppModel: ObservableObject, Hashable {
         self.uiFixLocalNotification = appInfo.fixLocalNotification
         self.uiFixCommonSectionAlignment = appInfo.fixCommonSectionAlignment
         self.uiReplayThreadInitialization = appInfo.replayThreadInitialization
+        self.uiUseLCKeychain = appInfo.useLCKeychain
         self.uiFixBackgroundTaskIdentifiers = appInfo.fixBackgroundTaskIdentifiers
         self.uiHideLiveContainer = appInfo.hideLiveContainer
         self.uiDontInjectTweakLoader = appInfo.dontInjectTweakLoader

@@ -9,9 +9,11 @@ void swizzle(Class class, SEL originalAction, SEL swizzledAction);
 bool performHookDyldApi(const char* functionName, uint32_t adrpOffset, void** origFunction, void* hookFunction);
 
 void NUDGuestHooksInit(void);
+void LCDocumentPickerHooksInit(void);
 void LCReturnToLibraryHooksInit(void);
 void SecItemGuestHooksInit(void);
 void EnvironmentGuestHooksInit(bool hideLiveContainer);
+BOOL LCManagedKeychainHooksInit(NSString *bundlePath, NSString *containerPath);
 void DyldHooksInit(bool hideLiveContainer, bool hookDlopen, uint32_t spoofSDKVersion);
 void NSFMGuestHooksInit(void);
 void NSFMGuestExtensionHooksInit(NSString *parentContainerPath);

@@ -293,6 +293,9 @@ NSString *LCPrepareGuestExtension(NSDictionary *request) {
     *_CFGetProcessPath() = executablePath;
     overwriteExecPath(executablePath);
     NUDGuestHooksInit();
+    if ([guestAppInfo[@"useLCKeychain"] boolValue] && !LCManagedKeychainHooksInit(appPath, homePath)) {
+        return @"Unable to install LC keychain hooks for the guest extension.";
+    }
     NSFMGuestExtensionHooksInit(request[@"parentContainerPath"]);
     NSURLSCGuestHooksInit();
 
@@ -582,13 +585,18 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     // hook NSUserDefault before running libraries' initializers
     LCDebugLog(@"Launch", @"begin build=%@ iOS=%@ liveProcess=%d shared=%d sideStore=%d hideLC=%d tweakLoaderDisabled=%d", lcMainBundle.infoDictionary[@"LCVersionInfo"], NSProcessInfo.processInfo.operatingSystemVersionString, isLiveProcess, isSharedBundle, isSideStore, [guestAppInfo[@"hideLiveContainer"] ?: @YES boolValue], [guestAppInfo[@"dontLoadTweakLoader"] ?: @YES boolValue]);
     NUDGuestHooksInit();
+    LCDocumentPickerHooksInit();
     LCReturnToLibraryHooksInit();
     LCGuestURLRouterInit();
     if (!isLiveProcess && [guestAppInfo[@"helperProcessesSupport"] boolValue]) {
         NSExtensionGuestHooksInit(appBundle.bundleURL, [NSURL fileURLWithPath:newHomePath isDirectory:YES]);
     }
     if(!isSideStore) {
-        SecItemGuestHooksInit();
+        if ([guestAppInfo[@"useLCKeychain"] boolValue]) {
+            if (!LCManagedKeychainHooksInit(bundlePath, newHomePath)) return @"Unable to install LC keychain hooks.";
+        } else {
+            SecItemGuestHooksInit();
+        }
         NSFMGuestHooksInit();
         initDead10ccFix();
     }

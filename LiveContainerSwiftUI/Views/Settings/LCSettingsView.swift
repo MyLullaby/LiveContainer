@@ -51,6 +51,7 @@ struct LCSettingsView: View {
     @AppStorage("LCOpenWebPageWithoutAsking") var silentOpenWebPage = false
     @AppStorage("LCDontSignApp", store: LCUtils.appGroupUserDefault) var dontSignApp = false
     @AppStorage("LCStrictHiding", store: LCUtils.appGroupUserDefault) var strictHiding = false
+    @AppStorage("LCRequireAuthenticationToShowHiddenApps", store: LCUtils.appGroupUserDefault) var requireAuthenticationToShowHiddenApps = true
     @AppStorage("dynamicColors", store: LCUtils.appGroupUserDefault) var dynamicColors = true
     @AppStorage("LCIconStyle", store: LCUtils.appGroupUserDefault) var iconStyle = 0
     
@@ -257,6 +258,19 @@ struct LCSettingsView: View {
                     Text("lc.settings.silentOpenWebPageDesc".loc)
                 }
                 
+                Section {
+                    Toggle(isOn: $requireAuthenticationToShowHiddenApps) {
+                        Text("lc.settings.requireAuthenticationToShowHiddenApps".loc)
+                    }
+                    .onChange(of: requireAuthenticationToShowHiddenApps) { enabled in
+                        if enabled {
+                            sharedModel.isHiddenAppUnlocked = false
+                        }
+                    }
+                } footer: {
+                    Text("lc.settings.requireAuthenticationToShowHiddenAppsDesc".loc)
+                }
+
                 if sharedModel.isHiddenAppUnlocked {
                     Section {
                         Toggle(isOn: $strictHiding) {

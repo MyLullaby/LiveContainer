@@ -62,6 +62,13 @@ struct LCAppSettingsView: View {
                 } footer: {
                     Text("包含当前应用和已注入的插件，不包含应用数据。")
                 }
+                Section {
+                    Toggle("使用 LC 钥匙串", isOn: $model.uiUseLCKeychain)
+                        .disabled(model.isAppRunning || model.isSigningInProgress)
+                    NavigationLink("LC 钥匙串诊断") { LCKeychainLogView() }
+                } footer: {
+                    Text("下次完整启动生效。关闭时使用系统钥匙串；开启后只写 LC 存储。符合条件的旧密码仅在本地查不到时尝试从系统读取，导入时回读校验。不弹出认证，不向系统写入。诊断日志不记录凭据。LC 存储的保护不等同于系统钥匙串。")
+                }
             }
             Section {
                 HStack {

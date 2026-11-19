@@ -1,6 +1,52 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "lc.settings.requireAuthenticationToShowHiddenApps" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Authenticate to Show Hidden Apps"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示隐藏应用时验证身份"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "顯示隱藏 App 時驗證身分"
+          }
+        }
+      }
+    },
+    "lc.settings.requireAuthenticationToShowHiddenAppsDesc" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When enabled, showing hidden apps requires Face ID, Touch ID, or your device passcode. When disabled, the reveal action enters the same unlocked state as successful authentication."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启后，显示隐藏应用需要 Face ID、Touch ID 或设备密码验证。关闭后，触发显示操作即可直接进入与验证通过相同的已解锁状态。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟後，顯示隱藏 App 需要 Face ID、Touch ID 或裝置密碼驗證。關閉後，觸發顯示操作即可直接進入與驗證通過相同的已解鎖狀態。"
+          }
+        }
+      }
+    },
     "lc.appSettings.threadInitialization" : {
       "extractionState": "manual",
       "localizations": {

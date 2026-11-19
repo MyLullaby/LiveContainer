@@ -1090,6 +1090,10 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
     }
     
     func authenticateUser() async {
+        if LCUtils.appGroupUserDefault.object(forKey: "LCRequireAuthenticationToShowHiddenApps") as? Bool == false {
+            sharedModel.isHiddenAppUnlocked = true
+            return
+        }
         do {
             if !(try await LCUtils.authenticateUser()) {
                 return
