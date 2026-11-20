@@ -13,12 +13,12 @@ enum LCAppPlugins {
         let images: [Image]
         let references: [Reference]
     }
-    struct Reference {
+    struct Reference: Hashable {
         let loader: String
         let load: String
         let target: String
     }
-    static let extensions: Set<String> = ["dylib", "deb", "zip"]
+    static let extensions: Set<String> = ["dylib", "framework", "bundle", "deb", "zip"]
     static let classificationKey = "LCPluginClassifications"
     static let visibilityFile = "LCPluginVisibility.plist"
 
@@ -32,6 +32,7 @@ enum LCAppPlugins {
             throw LCPluginError("主程序文件名无效。")
         }
         let main = bundle.appendingPathComponent(executable)
+        let executables = [main] + (try LCPluginPreparation.extensionExecutables(in: bundle))
         var files = Set<URL>()
         if let enumerator = fm.enumerator(at: bundle, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
             for case let url as URL in enumerator {
@@ -42,41 +43,38 @@ enum LCAppPlugins {
                 }
             }
         }
-        func expand(_ path: String, loader: URL) -> URL? {
-            if path.hasPrefix("@loader_path/") { return loader.appendingPathComponent(String(path.dropFirst(13))).standardizedFileURL.resolvingSymlinksInPath() }
-            if path.hasPrefix("@executable_path/") { return bundle.appendingPathComponent(String(path.dropFirst(17))).standardizedFileURL.resolvingSymlinksInPath() }
-            if path.hasPrefix("/") { return URL(fileURLWithPath: path).resolvingSymlinksInPath() }
-            return nil
-        }
-        var queue: [(URL, [URL])] = [(main, [])]
-        var visited = Set<URL>()
         var linked = Set<URL>()
-        var references: [Reference] = []
+        var references = Set<Reference>()
         var dependencies: [URL: [String]] = [:]
-        while !queue.isEmpty {
-            let (image, inheritedPaths) = queue.removeLast()
-            guard visited.insert(image).inserted else { continue }
-            let loads: [String]
-            let paths: [URL]
-            guard let inspection = try? LCPluginMachO.inspectDependencies(at: image) else { continue }
-            loads = inspection.dependencies
-            dependencies[image] = loads
-            paths = inspection.runtimeSearchPaths.sorted().compactMap { expand($0 + "/", loader: image.deletingLastPathComponent()) } + inheritedPaths
-            for load in loads {
-                if load.hasPrefix("/System/") || load.hasPrefix("/usr/lib/") { continue }
-                var candidates: [URL]
-                if load.hasPrefix("@rpath/") {
-                    candidates = paths.map { $0.appendingPathComponent(String(load.dropFirst(7))).standardizedFileURL.resolvingSymlinksInPath() }
-                } else {
-                    candidates = expand(load, loader: image.deletingLastPathComponent()).map { [$0] } ?? []
+        for executable in executables {
+            var queue: [(URL, [URL])] = [(executable, [])]
+            var visited = Set<URL>()
+            let directory = executable.deletingLastPathComponent()
+            while !queue.isEmpty {
+                let (image, inheritedPaths) = queue.removeLast()
+                guard visited.insert(image).inserted,
+                      let inspection = try? LCPluginMachO.inspectDependencies(at: image) else { continue }
+                dependencies[image] = inspection.dependencies
+                let parent = image.deletingLastPathComponent()
+                let paths = inspection.runtimeSearchPaths.compactMap {
+                    LCPluginPreparation.expandLoadPath($0, executableDirectory: directory, loaderDirectory: parent)
+                } + inheritedPaths
+                for load in inspection.dependencies {
+                    if load.hasPrefix("/System/") || load.hasPrefix("/usr/lib/") { continue }
+                    let candidates: [URL]
+                    if load.hasPrefix("@rpath/") {
+                        candidates = paths.map { $0.appendingPathComponent(String(load.dropFirst(7))).standardizedFileURL.resolvingSymlinksInPath() }
+                    } else {
+                        candidates = LCPluginPreparation.expandLoadPath(load, executableDirectory: directory, loaderDirectory: parent).map { [$0] } ?? []
+                    }
+                    guard let target = candidates.first(where: { fm.fileExists(atPath: $0.path) }),
+                          target.path.hasPrefix(bundle.path + "/") else { continue }
+                    files.insert(target)
+                    linked.insert(target)
+                    references.insert(Reference(loader: String(image.path.dropFirst(bundle.path.count + 1)), load: load,
+                                                target: String(target.path.dropFirst(bundle.path.count + 1))))
+                    queue.append((target, paths))
                 }
-                candidates = candidates.filter { $0.path.hasPrefix(bundle.path + "/") }
-                guard let target = candidates.first(where: { fm.fileExists(atPath: $0.path) }) else { continue }
-                files.insert(target)
-                linked.insert(target)
-                references.append(Reference(loader: String(image.path.dropFirst(bundle.path.count + 1)), load: load,
-                                            target: String(target.path.dropFirst(bundle.path.count + 1))))
-                if fm.fileExists(atPath: target.path) { queue.append((target, paths)) }
             }
         }
         let managed = Set((manifest?.images ?? []).map { bundle.appendingPathComponent($0).standardizedFileURL.resolvingSymlinksInPath() })
@@ -101,7 +99,7 @@ enum LCAppPlugins {
                          linked: linked.contains(file), exists: fm.fileExists(atPath: file.path),
                          isPlugin: managed.contains(file) || (classifications[relative] ?? detected.contains(file)))
         }.sorted { $0.id.localizedStandardCompare($1.id) == .orderedAscending }
-        return Inspection(images: images, references: references)
+        return Inspection(images: images, references: references.sorted { ($0.loader, $0.load, $0.target) < ($1.loader, $1.load, $1.target) })
     }
 
     static func savedClassifications(app: LCAppInfo) throws -> [String: Bool] {

@@ -232,6 +232,8 @@ extension UTType {
     static let dylib = UTType(filenameExtension: "dylib")!
     static let deb = UTType(filenameExtension: "deb")!
     static let lcFramework = UTType(filenameExtension: "framework", conformingTo: .package)!
+    static let lcResourceBundle = UTType(filenameExtension: "bundle", conformingTo: .package)!
+    static let lcPluginFileTypes: [UTType] = [.dylib, .lcFramework, .lcResourceBundle, .deb, .zip]
     static let p12 = UTType(filenameExtension: "p12")!
 }
 

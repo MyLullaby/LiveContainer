@@ -13,7 +13,7 @@ final class LCPluginImportRequest: Identifiable {
             var copies: [URL] = []
             for var url in files {
                 guard url.isFileURL, LCAppPlugins.extensions.contains(url.pathExtension.lowercased()) else {
-                    throw LCPluginError("请选择 dylib、deb 或 zip 插件文件。")
+                    throw LCPluginError("请选择 dylib、framework、bundle、deb 或 zip 插件文件。")
                 }
                 if resolveShareBookmark, !fm.isReadableFile(atPath: url.path),
                    let bookmark = LCUtils.appGroupUserDefault.data(forKey: "LCLaunchExtensionFileBookmark") {
@@ -51,6 +51,7 @@ struct LCPluginImportView: View {
     @State private var busy = false
     @State private var message: String?
     @State private var target: LCAppModel?
+    @State private var options = LCPluginPreparation.Options()
     @AppStorage("LCPluginLastTarget", store: LCUtils.appGroupUserDefault) private var lastTarget = ""
     @AppStorage("LCIconStyle", store: LCUtils.appGroupUserDefault) private var iconStyle = 0
     @Environment(\.colorScheme) private var colorScheme
@@ -65,6 +66,7 @@ struct LCPluginImportView: View {
     var body: some View {
         NavigationView {
             List {
+                LCPluginImportOptionsView(options: $options)
                 Section {
                     ForEach(apps, id: \.self) { app in
                         Button { importInto(app) } label: {
@@ -106,7 +108,7 @@ struct LCPluginImportView: View {
                 }
                 lastTarget = app.appInfo.relativeBundlePath ?? ""
                 target = app
-                try await app.updatePlugins(importing: request.files)
+                try await app.updatePlugins(importing: request.files, options: options)
                 message = "已导入到 \(app.appInfo.displayName() ?? "App")。"
             } catch { message = error.localizedDescription }
         }

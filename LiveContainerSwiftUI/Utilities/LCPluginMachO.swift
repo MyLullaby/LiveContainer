@@ -26,9 +26,10 @@ struct LCPluginMachO {
     }
 
     // Some injection tools leave 4-byte alignment. Only read dependencies this way; editing stays strict.
-    static func inspectDependencies(at url: URL) throws -> (dependencies: [String], runtimeSearchPaths: Set<String>) {
+    static func inspectDependencies(at url: URL) throws -> (dependencies: [String], runtimeSearchPaths: [String]) {
         let macho = try LCPluginMachO(data: Data(contentsOf: url), commandAlignment: 4)
-        return (try macho.dependencies, try macho.runtimeSearchPaths)
+        var seen = Set<String>()
+        return (try macho.dependencies, try macho.sliceSearchPaths.flatMap { $0 }.filter { seen.insert($0).inserted })
     }
 
     private init(data: Data, commandAlignment: Int) throws {
@@ -92,9 +93,13 @@ struct LCPluginMachO {
     }
 
     public var runtimeSearchPaths: Set<String> {
+        get throws { try Set(sliceSearchPaths.flatMap { $0 }) }
+    }
+
+    var sliceSearchPaths: [[String]] {
         get throws {
-            var paths: Set<String> = []
-            for slice in slices {
+            try slices.map { slice in
+                var paths: [String] = []
                 for command in try commands(slice) where command.type == 0x8000001c {
                     let offset = Int(try command.bytes.word(8))
                     guard offset >= 12, offset < command.bytes.count,
@@ -102,14 +107,25 @@ struct LCPluginMachO {
                           let value = String(data: command.bytes[offset..<end], encoding: .utf8) else {
                         throw LCPluginError("Mach-O 的 rpath 格式损坏。")
                     }
-                    paths.insert(value)
+                    paths.append(value)
                 }
+                return paths
             }
-            return paths
         }
     }
 
-    public mutating func edit(add: [String] = [], remove: Set<String> = [], replacements: [String: String] = [:], installID: String? = nil) throws {
+    func containsLoads(_ names: [String], absent: Set<String>, weak: Bool) throws -> Bool {
+        try slices.allSatisfy { slice in
+            let loads = try commands(slice).filter { Self.loads.contains($0.type) }
+            let paths = try loads.map { try path($0) }
+            let expectedType: UInt32 = weak ? 0x80000018 : 0xc
+            return absent.isDisjoint(with: paths) && names.allSatisfy { name in
+                paths.indices.contains { paths[$0] == name && loads[$0].type == expectedType }
+            }
+        }
+    }
+
+    public mutating func edit(add: [String] = [], remove: Set<String> = [], replacements: [String: String] = [:], installID: String? = nil, weak: Bool = false) throws {
         var output = data
         for slice in slices {
             let old = try commands(slice)
@@ -121,14 +137,19 @@ struct LCPluginMachO {
                     if let replacement = cmd.type == 0xd ? installID : replacements[original] {
                         cmd = try replacingPath(cmd, with: replacement)
                     }
+                    if (cmd.type == 0xc || cmd.type == 0x80000018), add.contains(try path(cmd)) {
+                        cmd = Command(type: weak ? 0x80000018 : 0xc, bytes: cmd.bytes)
+                        cmd.bytes.put(cmd.type, at: 0)
+                    }
                 }
                 revised.append(cmd)
             }
             var existing = Set(try revised.filter { Self.loads.contains($0.type) }.map { try path($0) })
             for name in add where !existing.contains(name) {
+                let type: UInt32 = weak ? 0x80000018 : 0xc
                 var bytes = Data(repeating: 0, count: 24)
-                bytes.put(0xc, at: 0); bytes.put(24, at: 8)
-                revised.append(try replacingPath(Command(type: 0xc, bytes: bytes), with: name))
+                bytes.put(type, at: 0); bytes.put(24, at: 8)
+                revised.append(try replacingPath(Command(type: type, bytes: bytes), with: name))
                 existing.insert(name)
             }
             let bytes = revised.reduce(into: Data()) { $0.append($1.bytes) }

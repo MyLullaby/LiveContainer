@@ -12,6 +12,7 @@ struct LCAppPluginsView: View {
     @State private var launchDiagnostic: [String: Any] = [:]
     @State private var classifications: [String: Bool] = [:]
     @State private var classificationChanged = false
+    @State private var importOptions = LCPluginPreparation.Options()
 
     var body: some View {
         List {
@@ -42,6 +43,7 @@ struct LCAppPluginsView: View {
                 }
             }
             Section {
+                LCPluginImportOptionsView(options: $importOptions)
                 Button(classificationChanged ? "确认并隐藏插件（有未保存修改）" : "确认并隐藏插件", systemImage: "checkmark.shield") { confirmVisibility() }
                     .disabled(inspection == nil)
                 Button("导入插件", systemImage: "square.and.arrow.down") { choosingFiles = true }
@@ -56,14 +58,18 @@ struct LCAppPluginsView: View {
                     } catch { message = error.localizedDescription }
                 }
             } footer: {
-                Text("支持 dylib、deb、zip。导入后立即修改并签名，成功后才更新列表；同名库直接覆盖。无需保留来源文件，重新修改请再次导入。移除全部处理列表中的第三方插件及 LC 导入资源，保留应用数据。")
+                Text("支持 dylib、framework、bundle、deb 和 zip。选项用于本次导入，同名库直接覆盖；签名成功后才替换原 App。")
             }
             if busy { ProgressView("正在准备插件…") }
         }
         .disabled(busy || model.isAppRunning || model.isSigningInProgress)
         .navigationTitle("应用插件")
-        .onAppear { reload() }
-        .betterFileImporter(isPresented: $choosingFiles, types: [.dylib, .deb, .zip], multiple: true) { urls in
+        .onAppear {
+            let bundle = URL(fileURLWithPath: model.appInfo.bundlePath())
+            if let saved = try? LCPluginPreparation.manifest(in: bundle)?.options { importOptions = saved }
+            reload()
+        }
+        .betterFileImporter(isPresented: $choosingFiles, types: UTType.lcPluginFileTypes, multiple: true) { urls in
             update(importing: urls)
         } onDismiss: { choosingFiles = false }
         .alert("插件处理", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
@@ -156,10 +162,32 @@ struct LCAppPluginsView: View {
 
     private func update(importing urls: [URL] = [], removing paths: [String] = []) {
         busy = true
+        let options = urls.isEmpty ? nil : importOptions
         Task { @MainActor in
             defer { busy = false; reload() }
-            do { try await model.updatePlugins(importing: urls, removing: paths) }
+            do { try await model.updatePlugins(importing: urls, removing: paths, options: options) }
             catch { message = "\(error.localizedDescription)\n原 App 未被替换，请调整文件后重新导入或移除。" }
+        }
+    }
+}
+
+struct LCPluginImportOptionsView: View {
+    @Binding var options: LCPluginPreparation.Options
+
+    var body: some View {
+        DisclosureGroup("导入选项") {
+            Picker("dylib 安装位置", selection: $options.installAtRoot) {
+                Text("Frameworks").tag(false)
+                Text("App 根目录").tag(true)
+            }
+            Picker("加载路径", selection: $options.loadPath) {
+                Text("@executable_path").tag(LCPluginPreparation.LoadPath.executable)
+                Text("@loader_path").tag(LCPluginPreparation.LoadPath.loader)
+                Text("@rpath").tag(LCPluginPreparation.LoadPath.rpath)
+            }
+            Toggle("弱加载", isOn: $options.weak)
+            Toggle("同时注入 App 扩展", isOn: $options.includeExtensions)
+            Toggle("使用 LC 内置 ElleKit 替换 Substrate", isOn: $options.replaceSubstrateWithElleKit)
         }
     }
 }

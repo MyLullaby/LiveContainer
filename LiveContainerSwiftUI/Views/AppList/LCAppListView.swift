@@ -315,7 +315,7 @@ struct LCAppListView : View, LCAppBannerDelegate, LCAppModelDelegate {
         }, onDismiss: {
             choosingIPA = false
         })
-        .betterFileImporter(isPresented: $choosingPlugin, types: [.dylib, .deb, .zip], multiple: true, callback: { urls in
+        .betterFileImporter(isPresented: $choosingPlugin, types: UTType.lcPluginFileTypes, multiple: true, callback: { urls in
             receivePlugins(urls)
         }, onDismiss: { choosingPlugin = false })
         .sheet(item: $pluginImport, onDismiss: { receivedPluginURL = nil }) { request in

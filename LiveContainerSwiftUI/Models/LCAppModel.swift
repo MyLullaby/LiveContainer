@@ -444,7 +444,7 @@ class LCAppModel: ObservableObject, Hashable {
         }
     }
 
-    @MainActor func updatePlugins(importing urls: [URL] = [], removing paths: [String] = []) async throws {
+    @MainActor func updatePlugins(importing urls: [URL] = [], removing paths: [String] = [], options: LCPluginPreparation.Options? = nil) async throws {
         guard !(appInfo is BuiltInSideStoreAppInfo), !isAppRunning, !isSigningInProgress else {
             throw LCPluginError("应用正在处理中或不支持修改插件。")
         }
@@ -455,7 +455,7 @@ class LCAppModel: ObservableObject, Hashable {
         }
         isAppRunning = true
         defer { isAppRunning = false }
-        let staged = try LCPluginPreparation.stage(app: appInfo, importing: urls, removing: paths)
+        let staged = try LCPluginPreparation.stage(app: appInfo, importing: urls, removing: paths, options: options)
         defer { try? FileManager.default.removeItem(at: staged) }
         guard let stagedInfo = LCAppInfo(bundlePath: staged.path) else { throw LCPluginError("无法读取修改后的应用。") }
         stagedInfo.info()["LCPatchRevision"] = -1
