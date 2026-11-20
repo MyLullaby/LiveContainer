@@ -181,6 +181,7 @@ struct LCPluginImportOptionsView: View {
                 Text("App 根目录").tag(true)
             }
             Picker("加载路径", selection: $options.loadPath) {
+                Text("自动（推荐）").tag(LCPluginPreparation.LoadPath.automatic)
                 Text("@executable_path").tag(LCPluginPreparation.LoadPath.executable)
                 Text("@loader_path").tag(LCPluginPreparation.LoadPath.loader)
                 Text("@rpath").tag(LCPluginPreparation.LoadPath.rpath)

@@ -4,11 +4,11 @@ import Foundation
 
 struct LCPluginPreparation {
     enum LoadPath: String, Codable, CaseIterable {
-        case rpath, executable, loader
+        case automatic, rpath, executable, loader
     }
 
     struct Options: Codable {
-        var loadPath: LoadPath = .executable
+        var loadPath: LoadPath = .automatic
         var installAtRoot = false
         var weak = true
         var includeExtensions = false
@@ -277,7 +277,7 @@ struct LCPluginPreparation {
 
     static func loadPaths(for images: [String], in bundle: URL, executable: URL, macho: LCPluginMachO, style: LoadPath) throws -> [String] {
         let directory = executable.deletingLastPathComponent()
-        let search = style == .rpath ? try macho.sliceSearchPaths : []
+        let search = style == .rpath || style == .automatic ? try macho.sliceSearchPaths : []
         let fm = FileManager.default
         return try images.map { image in
             let target = try contained(image, in: bundle).resolvingSymlinksInPath()
@@ -302,8 +302,10 @@ struct LCPluginPreparation {
                     return false
                 }
             }) {
-                return "@rpath/" + suffix
+                let rpath = "@rpath/" + suffix
+                if style == .rpath || rpath.utf8.count < loaderPath.utf8.count { return rpath }
             }
+            if style == .automatic { return loaderPath }
             throw LCPluginError("现有 rpath 无法解析到插件：\(image)。请选择其他加载路径。")
         }
     }

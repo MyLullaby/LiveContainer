@@ -158,10 +158,6 @@ struct LCPluginMachO {
             guard bytes.count <= available else {
                 throw LCPluginError("Mach-O 头部空间不足，无法安全添加插件或扩展依赖路径。请使用预留了 header padding 的构建；原 IPA 未被修改。")
             }
-            if bytes.count > oldSize {
-                let padding = data[(slice.offset + 32 + oldSize)..<(slice.offset + 32 + bytes.count)]
-                guard padding.allSatisfy({ $0 == 0 }) else { throw LCPluginError("Mach-O 头部后存在非空数据，已停止以避免覆盖程序。") }
-            }
             let start = slice.offset + 32
             let regionSize = max(oldSize, bytes.count)
             output.replaceSubrange(start..<(start + regionSize), with: bytes + Data(repeating: 0, count: regionSize - bytes.count))
@@ -215,12 +211,21 @@ struct LCPluginMachO {
 
     private func capacity(_ slice: Slice, commands: [Command]) throws -> Int {
         var first = slice.size
+        var headerSegmentEnd = 0
+        let oldSize = Int(try data.word(slice.offset + 20))
         for command in commands where command.type == 0x19 {
             let d = command.bytes
             guard d.count >= 72 else { throw LCPluginError("Mach-O segment 被截断。") }
             let fileoff = try d.long(40), filesize = try d.long(48)
             guard fileoff <= UInt64(slice.size), filesize <= UInt64(slice.size) - fileoff else { throw LCPluginError("Mach-O segment 越界。") }
-            if fileoff > 0, filesize > 0 { first = min(first, Int(fileoff)) }
+            if filesize > 0 {
+                if fileoff == 0 {
+                    headerSegmentEnd = max(headerSegmentEnd, Int(filesize))
+                    first = min(first, Int(filesize))
+                } else {
+                    first = min(first, Int(fileoff))
+                }
+            }
             let count = Int(try d.word(64))
             guard count <= (d.count - 72) / 80 else { throw LCPluginError("Mach-O section 数量无效。") }
             for i in 0..<count {
@@ -228,14 +233,33 @@ struct LCPluginMachO {
                 let offset = Int(try d.word(s + 48))
                 let flags = try d.word(s + 64) & 0xff
                 let size = try d.long(s + 40)
-                if offset > 0, size > 0, ![UInt32(1), 0xc, 0x12].contains(flags) {
-                    guard offset <= slice.size, size <= UInt64(slice.size - offset) else { throw LCPluginError("Mach-O section 越界。") }
+                if size > 0, ![UInt32(1), 0xc, 0x12].contains(flags) {
+                    guard UInt64(offset) >= fileoff, UInt64(offset) <= fileoff + filesize,
+                          size <= fileoff + filesize - UInt64(offset) else { throw LCPluginError("Mach-O section 越界。") }
                     first = min(first, offset)
                 }
             }
         }
-        let oldSize = Int(try data.word(slice.offset + 20))
-        guard first < slice.size, first >= 32 + oldSize else { throw LCPluginError("无法确定 Mach-O 可安全修改的头部空间。") }
+        for command in commands {
+            let offset: UInt64
+            switch command.type {
+            case 0x21, 0x2c:
+                guard try command.bytes.word(12) > 0 else { continue }
+                offset = UInt64(try command.bytes.word(8))
+            case 0x31:
+                guard try command.bytes.long(32) > 0 else { continue }
+                offset = try command.bytes.long(24)
+            case 0x80000028:
+                offset = try command.bytes.long(8)
+            default:
+                continue
+            }
+            guard offset < UInt64(slice.size) else { throw LCPluginError("Mach-O 数据偏移越界。") }
+            first = min(first, Int(offset))
+        }
+        guard headerSegmentEnd >= 32 + oldSize, first < slice.size, first >= 32 + oldSize else {
+            throw LCPluginError("无法确定 Mach-O 可安全修改的头部空间。")
+        }
         return first - 32
     }
 }
