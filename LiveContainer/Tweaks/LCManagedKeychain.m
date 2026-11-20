@@ -978,23 +978,23 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
         if (![changes isKindOfClass:NSDictionary.class] || !changes.count) return fail(errSecParam, @"invalid-update");
         optionStatus = LCKeychainNormalizeACL(&changes, NO, &optionReason);
         if (optionStatus != errSecSuccess) return fail(optionStatus, optionReason);
-        NSString *modificationDate = KC(kSecAttrModificationDate);
-        id suppliedDate = changes[modificationDate];
-        if (suppliedDate) {
-            if (![suppliedDate isKindOfClass:NSDate.class]) return fail(errSecParam, LCKeychainSafeOption(modificationDate, suppliedDate, types));
-            // Accept echoed metadata, but always timestamp the update in the store.
-            NSMutableDictionary *normalized = changes.mutableCopy;
-            [normalized removeObjectForKey:modificationDate];
-            changes = normalized.copy;
+        NSMutableDictionary *normalized = nil;
+        // Dates returned by copy can be echoed in updates; the store owns both timestamps.
+        for (NSString *key in @[KC(kSecAttrCreationDate), KC(kSecAttrModificationDate)]) {
+            id value = changes[key];
+            if (!value) continue;
+            if (![value isKindOfClass:NSDate.class]) return fail(errSecParam, LCKeychainSafeOption(key, value, types));
+            if (!normalized) normalized = changes.mutableCopy;
+            [normalized removeObjectForKey:key];
         }
         id genericValue = changes[KC(kSecAttrGeneric)];
         if (genericPassword && [genericValue isKindOfClass:NSString.class]) {
             NSData *genericData = [genericValue dataUsingEncoding:NSUTF8StringEncoding];
             if (!genericData) return fail(errSecParam, @"invalid-generic-string-encoding");
-            NSMutableDictionary *normalized = changes.mutableCopy;
+            if (!normalized) normalized = changes.mutableCopy;
             normalized[KC(kSecAttrGeneric)] = genericData;
-            changes = normalized;
         }
+        if (normalized) changes = normalized;
         for (NSString *key in changes) {
             id value = changes[key];
             if (certificateItem && ![key isEqual:KC(kSecAttrLabel)] && ![key isEqual:KC(kSecAttrAccessible)]) {
