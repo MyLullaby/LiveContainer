@@ -243,7 +243,7 @@ static BOOL LCKeychainValidAttribute(NSString *key, id value, NSDictionary *type
     return YES;
 }
 
-static OSStatus LCKeychainNormalizeACL(NSDictionary *__strong *input, NSString **reason) {
+static OSStatus LCKeychainNormalizeACL(NSDictionary *__strong *input, BOOL passwordRead, NSString **reason) {
     if ([(*input)[KC(kSecAttrAccessible)] isEqual:KC(kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly)]) {
         *reason = @"passcode-bound-accessibility-not-supported";
         return errSecUnimplemented;
@@ -254,6 +254,13 @@ static OSStatus LCKeychainNormalizeACL(NSDictionary *__strong *input, NSString *
     if (CFGetTypeID(reference) != SecAccessControlGetTypeID()) {
         *reason = @"invalid-access-control-type";
         return errSecParam;
+    }
+    if (passwordRead) {
+        // ACL metadata in a read does not select records or replace their stored protection.
+        NSMutableDictionary *normalized = [*input mutableCopy];
+        [normalized removeObjectForKey:KC(kSecAttrAccessControl)];
+        *input = normalized.copy;
+        return errSecSuccess;
     }
     for (NSString *protection in LCKeychainAccessibilityBuckets()) {
         // Only an exact match to a no-flags ACL can use the store's accessibility policy.
@@ -769,7 +776,7 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
     BOOL localMetadataSelector = operation != LCKeychainAdd && options[KC(kSecAttrAccessControl)] != nil;
     BOOL allowLegacyRead = !localMetadataSelector;
     NSString *optionReason = nil;
-    OSStatus optionStatus = LCKeychainNormalizeACL(&options, &optionReason);
+    OSStatus optionStatus = LCKeychainNormalizeACL(&options, localPasswordRead, &optionReason);
     if (optionStatus != errSecSuccess) return fail(optionStatus, optionReason);
     id valueReference = nil;
     NSString *certificateEmail = nil, *certificateSubject = nil;
@@ -969,8 +976,17 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
     NSDictionary *changes = (__bridge NSDictionary *)updates;
     if (operation == LCKeychainUpdate) {
         if (![changes isKindOfClass:NSDictionary.class] || !changes.count) return fail(errSecParam, @"invalid-update");
-        optionStatus = LCKeychainNormalizeACL(&changes, &optionReason);
+        optionStatus = LCKeychainNormalizeACL(&changes, NO, &optionReason);
         if (optionStatus != errSecSuccess) return fail(optionStatus, optionReason);
+        NSString *modificationDate = KC(kSecAttrModificationDate);
+        id suppliedDate = changes[modificationDate];
+        if (suppliedDate) {
+            if (![suppliedDate isKindOfClass:NSDate.class]) return fail(errSecParam, LCKeychainSafeOption(modificationDate, suppliedDate, types));
+            // Accept echoed metadata, but always timestamp the update in the store.
+            NSMutableDictionary *normalized = changes.mutableCopy;
+            [normalized removeObjectForKey:modificationDate];
+            changes = normalized.copy;
+        }
         id genericValue = changes[KC(kSecAttrGeneric)];
         if (genericPassword && [genericValue isKindOfClass:NSString.class]) {
             NSData *genericData = [genericValue dataUsingEncoding:NSUTF8StringEncoding];
@@ -1376,7 +1392,7 @@ static SecKeyRef LCManagedGenerateSoftwareKey(NSURL *directory, NSString *operat
         if (![location isKindOfClass:NSDictionary.class]) { status = errSecParam; break; }
         NSDictionary *normalized = location;
         if (!softwareToken) {
-            status = LCKeychainNormalizeACL(&normalized, &reason);
+            status = LCKeychainNormalizeACL(&normalized, NO, &reason);
             if (status != errSecSuccess) break;
         }
         NSMutableDictionary *crypto = normalized.mutableCopy, *record = [NSMutableDictionary dictionary];
