@@ -451,32 +451,45 @@ static NSArray *LCKeychainIdentity(NSDictionary *item) {
     ]];
 }
 
-static BOOL LCKeychainValidStore(NSArray *items) {
-    if (![items isKindOfClass:NSArray.class]) return NO;
-    NSMutableSet *identities = [NSMutableSet set];
-    for (NSDictionary *item in items) {
-        if (![item isKindOfClass:NSDictionary.class]) return NO;
+static OSStatus LCKeychainValidateStore(NSArray *items, NSIndexSet *updated, NSString **reason) {
+    enum { UntouchedRecord = 1, UpdatedRecord = 2 };
+    if (![items isKindOfClass:NSArray.class]) return errSecDecode;
+    NSMutableDictionary<NSArray *, NSNumber *> *identities = [NSMutableDictionary dictionary];
+    BOOL conflictsWithExisting = NO, conflictsWithinUpdate = NO;
+    for (NSUInteger index = 0; index < items.count; index++) {
+        NSDictionary *item = items[index];
+        if (![item isKindOfClass:NSDictionary.class]) return errSecDecode;
         NSString *itemClass = item[KC(kSecClass)];
         NSDictionary *types = [itemClass isKindOfClass:NSString.class] ? LCKeychainAttributeTypes(itemClass) : nil;
         if (!types || [itemClass isEqual:KC(kSecClassIdentity)] || ![item[KC(kSecValueData)] isKindOfClass:NSData.class] ||
             ![item[KC(kSecAttrCreationDate)] isKindOfClass:NSDate.class] ||
-            ![item[KC(kSecAttrModificationDate)] isKindOfClass:NSDate.class] || !item[KC(kSecAttrAccessible)]) return NO;
+            ![item[KC(kSecAttrModificationDate)] isKindOfClass:NSDate.class] || !item[KC(kSecAttrAccessible)]) return errSecDecode;
         for (NSString *key in item) {
             if ([key isEqual:KC(kSecClass)] || [key isEqual:KC(kSecValueData)] ||
                 [key isEqual:KC(kSecAttrCreationDate)] || [key isEqual:KC(kSecAttrModificationDate)]) continue;
             if ([key isEqual:LCKeychainRecordRef] && [item[key] isKindOfClass:NSData.class]) continue;
-            if (!LCKeychainValidAttribute(key, item[key], types, NO)) return NO;
+            if (!LCKeychainValidAttribute(key, item[key], types, NO)) return errSecDecode;
         }
         if ([itemClass isEqual:KC(kSecClassKey)] && (!LCKeychainSoftwareKey(item) ||
             ![item[KC(kSecAttrApplicationLabel)] length] || ![item[KC(kSecAttrIsPermanent)] boolValue] ||
-            ![item[KC(kSecValueData)] length])) return NO;
+            ![item[KC(kSecValueData)] length])) return errSecDecode;
         if ([itemClass isEqual:KC(kSecClassCertificate)] && (!item[KC(kSecAttrIssuer)] ||
-            ![item[KC(kSecAttrSerialNumber)] length] || ![item[KC(kSecValueData)] length])) return NO;
+            ![item[KC(kSecAttrSerialNumber)] length] || ![item[KC(kSecValueData)] length])) return errSecDecode;
         NSArray *identity = LCKeychainIdentity(item);
-        if ([identities containsObject:identity]) return NO;
-        [identities addObject:identity];
+        // A destination identity can be shared by updated records, untouched records, or both.
+        NSUInteger current = [updated containsIndex:index] ? UpdatedRecord : UntouchedRecord;
+        NSUInteger previous = [identities[identity] unsignedIntegerValue];
+        if (previous) {
+            if (!updated) return errSecDuplicateItem;
+            conflictsWithExisting |= (previous | current) == (UntouchedRecord | UpdatedRecord);
+            conflictsWithinUpdate |= current == UpdatedRecord && (previous & UpdatedRecord) != 0;
+        }
+        identities[identity] = @(previous | current);
     }
-    return YES;
+    if (!conflictsWithExisting && !conflictsWithinUpdate) return errSecSuccess;
+    *reason = conflictsWithExisting && conflictsWithinUpdate ? @"duplicate-item-update-both" :
+        conflictsWithExisting ? @"duplicate-item-update-existing" : @"duplicate-item-update-batch";
+    return errSecDuplicateItem;
 }
 
 static NSDictionary *LCKeychainPasswordDefaults(NSString *itemClass) {
@@ -1054,7 +1067,7 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
         BOOL hasMetadata = [decoded isKindOfClass:NSDictionary.class];
         NSArray *existing = hasMetadata ? decoded[@"items"] : decoded;
         NSArray *blocked = hasMetadata ? decoded[@"legacy-blocked"] : @[];
-        if (!LCKeychainValidStore(existing) || ![blocked isKindOfClass:NSArray.class]) {
+        if (LCKeychainValidateStore(existing, nil, NULL) != errSecSuccess || ![blocked isKindOfClass:NSArray.class]) {
             status = errSecDecode; reason = @"store-invalid-records"; break;
         }
         for (id entry in blocked) {
@@ -1084,7 +1097,7 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
                 status = errSecDecode; reason = @"store-invalid-after-first-unlock"; break;
             }
             existing = [existing arrayByAddingObjectsFromArray:afterItems];
-            if (!LCKeychainValidStore(existing)) {
+            if (LCKeychainValidateStore(existing, nil, NULL) != errSecSuccess) {
                 status = errSecDecode; reason = @"store-invalid-records"; break;
             }
         }
@@ -1092,6 +1105,7 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
         NSMutableArray *legacyBlocked = blocked.mutableCopy;
         BOOL migrate = !splitStore && data != nil;
         BOOL dirty = NO;
+        NSIndexSet *updatedIndexes = nil;
         if (operation == LCKeychainAdd) {
             NSDate *now = NSDate.date;
             NSArray *newItems = additionalKey ? @[attributes, additionalKey.mutableCopy] :
@@ -1221,7 +1235,8 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
                     candidate[KC(kSecValueData)] = legacy[KC(kSecValueData)];
                     candidate[KC(kSecAttrCreationDate)] = legacy[KC(kSecAttrCreationDate)] ?: NSDate.date;
                     candidate[KC(kSecAttrModificationDate)] = legacy[KC(kSecAttrModificationDate)] ?: candidate[KC(kSecAttrCreationDate)];
-                    if (!LCKeychainValidStore(@[candidate]) || !LCKeychainMatches(candidate, nil, attributes, defaults)) {
+                    if (LCKeychainValidateStore(@[candidate], nil, NULL) != errSecSuccess ||
+                        !LCKeychainMatches(candidate, nil, attributes, defaults)) {
                         LCKeychainLogMessage(@"legacy-import", className, errSecDecode, @"legacy-record-incompatible");
                         candidate = nil;
                     }
@@ -1300,6 +1315,7 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
                 // An identity delete removes its certificate, not a possibly shared private key.
                 [items removeObjectsAtIndexes:matches];
             } else {
+                updatedIndexes = matches;
                 NSDate *now = NSDate.date;
                 [matches enumerateIndexesUsingBlock:^(NSUInteger index, BOOL *stop) {
                     NSMutableDictionary *item = [items[index] mutableCopy];
@@ -1309,8 +1325,32 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
                 }];
             }
         }
-        if (!LCKeychainValidStore(items)) {
-            status = errSecDuplicateItem; reason = @"duplicate-item"; break;
+        NSString *conflict = nil;
+        OSStatus validation = LCKeychainValidateStore(items, updatedIndexes, &conflict);
+        if (validation != errSecSuccess) {
+            status = validation;
+            reason = conflict ?: (validation == errSecDuplicateItem ? @"duplicate-item" : @"store-invalid-write-records");
+            if (updatedIndexes) {
+                NSMutableArray<NSString *> *fields = [NSMutableArray array];
+                // Only mutable identity fields can explain an update collision. Never log their values.
+                NSArray<NSString *> *identityFields = passwordItem ? (genericPassword ? @[KC(kSecAttrAccount), KC(kSecAttrService)] :
+                    @[KC(kSecAttrAccount), KC(kSecAttrServer), KC(kSecAttrSecurityDomain), KC(kSecAttrProtocol),
+                      KC(kSecAttrAuthenticationType), KC(kSecAttrPort), KC(kSecAttrPath)]) :
+                    keyItem ? @[KC(kSecAttrApplicationTag)] : @[];
+                for (NSString *field in identityFields) {
+                    id value = changes[field];
+                    if (!value) continue;
+                    id defaultValue = keyItem ? NSData.data : defaults[field];
+                    NSUInteger changed = [updatedIndexes indexPassingTest:^BOOL(NSUInteger index, BOOL *stop) {
+                        return ![value isEqual:(existing[index][field] ?: defaultValue)];
+                    }];
+                    if (changed != NSNotFound) [fields addObject:field];
+                }
+                if (validation == errSecDecode) reason = @"store-invalid-update-records";
+                reason = [NSString stringWithFormat:@"%@ matched=%lu identity-fields=%@", reason,
+                    (unsigned long)updatedIndexes.count, fields.count ? [fields componentsJoinedByString:@","] : @"none"];
+            }
+            break;
         }
         OSStatus writeStatus = LCKeychainWriteStore(store, items, legacyBlocked, splitStore, &reason);
         if (writeStatus != errSecSuccess) {
