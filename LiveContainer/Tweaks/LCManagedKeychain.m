@@ -221,6 +221,36 @@ static BOOL LCKeychainValidAttribute(NSString *key, id value, NSDictionary *type
     return YES;
 }
 
+static OSStatus LCKeychainNormalizePasswordACL(NSDictionary *__strong *input, NSString **reason) {
+    id control = (*input)[KC(kSecAttrAccessControl)];
+    if (!control) return errSecSuccess;
+    CFTypeRef reference = (__bridge CFTypeRef)control;
+    if (CFGetTypeID(reference) != SecAccessControlGetTypeID()) {
+        *reason = @"invalid-password-access-control-type";
+        return errSecParam;
+    }
+    for (NSString *protection in @[KC(kSecAttrAccessibleWhenUnlocked), KC(kSecAttrAccessibleAfterFirstUnlock),
+                                   KC(kSecAttrAccessibleWhenUnlockedThisDeviceOnly), KC(kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly)]) {
+        // Only an exact match to a no-flags ACL can use the store's accessibility policy.
+        SecAccessControlRef ordinary = SecAccessControlCreateWithFlags(NULL, (__bridge CFTypeRef)protection, 0, NULL);
+        BOOL matches = ordinary && CFEqual(reference, ordinary);
+        if (ordinary) CFRelease(ordinary);
+        if (!matches) continue;
+        id accessible = (*input)[KC(kSecAttrAccessible)];
+        if (accessible && ![accessible isEqual:protection]) {
+            *reason = @"conflicting-password-access-control";
+            return errSecParam;
+        }
+        NSMutableDictionary *normalized = [*input mutableCopy];
+        [normalized removeObjectForKey:KC(kSecAttrAccessControl)];
+        normalized[KC(kSecAttrAccessible)] = protection;
+        *input = normalized.copy;
+        return errSecSuccess;
+    }
+    *reason = @"password-access-control-not-supported";
+    return errSecUnimplemented;
+}
+
 static NSString *LCKeychainSafeOption(id key, id value, NSDictionary *types) {
     // Never echo arbitrary dictionary keys or attribute values into diagnostics.
     static NSArray<NSString *> *known;
@@ -694,7 +724,13 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
     BOOL passwordItem = !keyItem && !certificateItem;
     BOOL genericPassword = [itemClass isEqual:KC(kSecClassGenericPassword)];
     BOOL localPasswordRead = passwordItem && operation == LCKeychainCopy;
-    BOOL allowLegacyRead = YES;
+    BOOL localMetadataSelector = passwordItem && operation != LCKeychainAdd && options[KC(kSecAttrAccessControl)] != nil;
+    BOOL allowLegacyRead = !localMetadataSelector;
+    if (passwordItem) {
+        NSString *reason = nil;
+        OSStatus status = LCKeychainNormalizePasswordACL(&options, &reason);
+        if (status != errSecSuccess) return fail(status, reason);
+    }
     id valueReference = nil;
     NSString *certificateEmail = nil;
     NSDate *certificateDate = nil;
@@ -743,12 +779,13 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
             // LC has one guest-local store; this iOS option does not select another store.
             if (!LCKeychainIsBoolean(value)) return fail(errSecParam, LCKeychainSafeOption(key, value, types));
         } else if ([key isEqual:KC(kSecAttrCreationDate)] || [key isEqual:KC(kSecAttrModificationDate)]) {
-            if (!localPasswordRead || ![value isKindOfClass:NSDate.class]) {
-                return fail(errSecParam, @"invalid-password-date-selector");
+            if (operation == LCKeychainAdd || ![value isKindOfClass:NSDate.class]) {
+                return fail(errSecParam, passwordItem ? @"invalid-password-date-selector" : @"invalid-date-selector");
             }
             // Dates returned by LC describe its local record, not a system record.
             attributes[key] = value;
             allowLegacyRead = NO;
+            localMetadataSelector = YES;
         } else if ([key isEqual:KC(kSecValuePersistentRef)] || [key isEqual:KC(kSecMatchItemList)]) {
             continue; // Validated as a group before interpreting the other options.
         } else if ([key isEqual:KC(kSecMatchEmailAddressIfPresent)]) {
@@ -860,6 +897,11 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
     NSDictionary *changes = (__bridge NSDictionary *)updates;
     if (operation == LCKeychainUpdate) {
         if (![changes isKindOfClass:NSDictionary.class] || !changes.count) return fail(errSecParam, @"invalid-update");
+        if (passwordItem) {
+            NSString *reason = nil;
+            OSStatus status = LCKeychainNormalizePasswordACL(&changes, &reason);
+            if (status != errSecSuccess) return fail(status, reason);
+        }
         id genericValue = changes[KC(kSecAttrGeneric)];
         if (genericPassword && [genericValue isKindOfClass:NSString.class]) {
             NSData *genericData = [genericValue dataUsingEncoding:NSUTF8StringEncoding];
@@ -1088,7 +1130,7 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
             }
             if (passwordItem && !requestsSync && !attributes[KC(kSecAttrAccessGroup)] &&
                 (operation == LCKeychainDelete || (operation == LCKeychainUpdate && matches.count))) {
-                if (operation == LCKeychainDelete && matchLimit == NSUIntegerMax &&
+                if (operation == LCKeychainDelete && matchLimit == NSUIntegerMax && !localMetadataSelector &&
                     !hasPersistentSelector && ![legacyBlocked containsObject:attributes]) {
                     [legacyBlocked addObject:attributes.copy];
                     dirty = YES;
