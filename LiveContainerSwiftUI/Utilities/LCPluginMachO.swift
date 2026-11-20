@@ -16,6 +16,9 @@ struct LCPluginMachO {
     private let slices: [Slice]
     private let commandAlignment: Int
     private static let loads: Set<UInt32> = [0xc, 0x80000018, 0x8000001f, 0x80000023, 0x20]
+    private static let disabledTweakLoader: UInt32 = 0x114514
+    private static let disabledDuplicateLoad: UInt32 = 0x114515
+    static let tweakLoaderName = "TweakLoader.dylib"
 
     public init(url: URL) throws {
         do { try self.init(data: Data(contentsOf: url)) }
@@ -125,14 +128,36 @@ struct LCPluginMachO {
         }
     }
 
-    public mutating func edit(add: [String] = [], remove: Set<String> = [], replacements: [String: String] = [:], installID: String? = nil, weak: Bool = false) throws {
+    @discardableResult
+    public mutating func edit(add: [String] = [], remove: Set<String> = [], replacements: [String: String] = [:], installID: String? = nil, weak: Bool = false, removeTweakLoader: Bool = false) throws -> Bool {
         var output = data
+        var changed = false
         for slice in slices {
             let old = try commands(slice)
+            let lastRetainedLoad = try removeTweakLoader ? old.lastIndex { cmd in
+                guard Self.loads.contains(cmd.type) else { return false }
+                let name = try path(cmd)
+                return !remove.contains(name) && (name as NSString).lastPathComponent != Self.tweakLoaderName
+            } : nil
             var revised: [Command] = []
-            for var cmd in old {
+            for (index, originalCommand) in old.enumerated() {
+                var cmd = originalCommand
+                if removeTweakLoader {
+                    if cmd.type == Self.disabledTweakLoader { continue }
+                    if cmd.type == Self.disabledDuplicateLoad, let name = try? path(cmd),
+                       (name as NSString).lastPathComponent == Self.tweakLoaderName { continue }
+                }
                 if Self.loads.contains(cmd.type) || cmd.type == 0xd {
                     let original = try path(cmd)
+                    if removeTweakLoader, Self.loads.contains(cmd.type), (original as NSString).lastPathComponent == Self.tweakLoaderName {
+                        if let lastRetainedLoad, index < lastRetainedLoad {
+                            let type: UInt32 = 0x80000018
+                            var bytes = Data(repeating: 0, count: 24)
+                            bytes.put(type, at: 0)
+                            revised.append(try replacingPath(Command(type: type, bytes: bytes), with: "@loader_path/.LCPluginPreparation/\(index)"))
+                        }
+                        continue
+                    }
                     if Self.loads.contains(cmd.type), remove.contains(original) { continue }
                     if let replacement = cmd.type == 0xd ? installID : replacements[original] {
                         cmd = try replacingPath(cmd, with: replacement)
@@ -160,11 +185,26 @@ struct LCPluginMachO {
             }
             let start = slice.offset + 32
             let regionSize = max(oldSize, bytes.count)
-            output.replaceSubrange(start..<(start + regionSize), with: bytes + Data(repeating: 0, count: regionSize - bytes.count))
-            output.put(UInt32(revised.count), at: slice.offset + 16)
-            output.put(UInt32(bytes.count), at: slice.offset + 20)
+            if removeTweakLoader {
+                let paddingStart = start + oldSize
+                let legacyPath = "@loader_path/../../Tweaks/" + Self.tweakLoaderName
+                let searchEnd = min(start + available, paddingStart + legacyPath.utf8.count + 1)
+                if let end = data[paddingStart..<searchEnd].firstIndex(of: 0),
+                   let residue = String(data: data[paddingStart..<end], encoding: .utf8),
+                   residue.hasSuffix(Self.tweakLoaderName), legacyPath.hasSuffix(residue) {
+                    output.resetBytes(in: paddingStart..<end)
+                    changed = true
+                }
+            }
+            if bytes.count != oldSize || bytes != data[start..<(start + oldSize)] {
+                output.replaceSubrange(start..<(start + regionSize), with: bytes + Data(repeating: 0, count: regionSize - bytes.count))
+                output.put(UInt32(revised.count), at: slice.offset + 16)
+                output.put(UInt32(bytes.count), at: slice.offset + 20)
+                changed = true
+            }
         }
         data = output
+        return changed
     }
 
     public func write(to url: URL) throws { try data.write(to: url, options: .atomic) }

@@ -468,6 +468,13 @@ class LCAppModel: ObservableObject, Hashable {
         updatedInfo.relativeBundlePath = appInfo.relativeBundlePath
         updatedInfo.isShared = appInfo.isShared
         appInfo = updatedInfo
+        if uiDontInjectTweakLoader != updatedInfo.dontInjectTweakLoader {
+            uiDontInjectTweakLoader = updatedInfo.dontInjectTweakLoader
+        }
+        if uiDontLoadTweakLoader != updatedInfo.dontLoadTweakLoader {
+            uiDontLoadTweakLoader = updatedInfo.dontLoadTweakLoader
+        }
+        uiTweakLoaderInjectFailed = updatedInfo.info()["LCTweakLoaderCantInject"] as? Bool ?? false
     }
 
     private func signApp(_ info: LCAppInfo, force: Bool) async throws {

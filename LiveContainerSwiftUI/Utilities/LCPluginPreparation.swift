@@ -37,6 +37,8 @@ struct LCPluginPreparation {
         let fm = FileManager.default
         let bundle = URL(fileURLWithPath: app.bundlePath()).resolvingSymlinksInPath()
         let previous = try manifest(in: bundle)
+        let migrateTweakLoader = !urls.isEmpty || oldApp != nil
+        let tweakLoaderName = LCPluginMachO.tweakLoaderName
         var options = requestedOptions ?? previous?.options ?? Options()
         var items: [(url: URL, path: String)] = []
         if let oldApp {
@@ -46,6 +48,7 @@ struct LCPluginPreparation {
                 options = oldManifest.options ?? Options(loadPath: .loader, weak: false)
             }
             for path in oldManifest?.injectedFiles ?? [] {
+                if (path as NSString).lastPathComponent == tweakLoaderName { continue }
                 let file = try contained(path, in: oldBundle)
                 let expected = (file.pathExtension.lowercased() == "bundle" ? "" : "Frameworks/") + file.lastPathComponent
                 let rootDylib = file.pathExtension.lowercased() == "dylib" && path == file.lastPathComponent
@@ -61,9 +64,6 @@ struct LCPluginPreparation {
             }
         }
         guard !app.is32bit else { throw LCPluginError("直接注入插件暂不支持 32 位 Guest。") }
-        if (!urls.isEmpty || !items.isEmpty) && (!app.dontInjectTweakLoader || !app.dontLoadTweakLoader) {
-            throw LCPluginError("请先在应用设置中打开“不注入 TweakLoader”和“不加载 TweakLoader”。")
-        }
         let info = try PropertyListSerialization.propertyList(from: Data(contentsOf: bundle.appendingPathComponent("Info.plist")), format: nil) as? [String: Any]
         guard let executable = info?["CFBundleExecutable"] as? String, !executable.isEmpty,
               executable == (executable as NSString).lastPathComponent else { throw LCPluginError("主程序文件名无效。") }
@@ -147,6 +147,30 @@ struct LCPluginPreparation {
             }
             let frameworks = staged.appendingPathComponent("Frameworks")
             try fm.createDirectory(at: frameworks, withIntermediateDirectories: true)
+            if migrateTweakLoader {
+                if let reference = inspection.references.first(where: {
+                    !executablePaths.contains($0.loader) &&
+                        (($0.load as NSString).lastPathComponent == tweakLoaderName || ($0.target as NSString).lastPathComponent == tweakLoaderName)
+                }) {
+                    throw LCPluginError("\(reference.loader) 仍依赖 TweakLoader，无法自动迁移。")
+                }
+                for directory in Set(executables.map { $0.deletingLastPathComponent() }) {
+                    for parent in [directory, directory.appendingPathComponent("Frameworks")] where fm.fileExists(atPath: parent.path) {
+                        let loader = parent.appendingPathComponent(tweakLoaderName)
+                        if (try? fm.destinationOfSymbolicLink(atPath: loader.path)) != nil || fm.fileExists(atPath: loader.path) {
+                            let relativeParent = String(parent.path.dropFirst(staged.path.count + 1))
+                            if parent.path != staged.path { _ = try contained(relativeParent, in: staged) }
+                            let values = try loader.resourceValues(forKeys: [.isSymbolicLinkKey, .isRegularFileKey])
+                            guard values.isSymbolicLink == true || values.isRegularFile == true else {
+                                throw LCPluginError("无法安全移除 \(loader.lastPathComponent)：它不是 dylib 文件。")
+                            }
+                            try fm.removeItem(at: loader)
+                        }
+                    }
+                }
+                injectedFiles.removeAll { ($0 as NSString).lastPathComponent == tweakLoaderName }
+                images.removeAll { ($0 as NSString).lastPathComponent == tweakLoaderName }
+            }
             var binaries: [URL] = []
             var previousTargets: [String: Set<String>] = [:]
             for (item, relative) in items {
@@ -213,15 +237,18 @@ struct LCPluginPreparation {
                 let remove = removedLoads[relative] ?? []
                 let previouslyLinked = previousTargets[relative] ?? []
                 let add = target == main || options.includeExtensions ? addedImages : addedImages.filter(previouslyLinked.contains)
-                if add.isEmpty && remove.isEmpty { continue }
+                if add.isEmpty && remove.isEmpty && !migrateTweakLoader { continue }
                 do {
                     var macho = try LCPluginMachO(url: target)
                     try macho.requireARM64()
                     try macho.requireDecrypted()
                     let loads = try loadPaths(for: add, in: staged, executable: target, macho: macho, style: options.loadPath)
-                    try macho.edit(add: loads, remove: remove, weak: options.weak)
-                    try macho.write(to: target)
-                    guard try LCPluginMachO(url: target).containsLoads(loads, absent: remove.subtracting(loads), weak: options.weak) else {
+                    if try macho.edit(add: loads, remove: remove, weak: options.weak, removeTweakLoader: migrateTweakLoader) {
+                        try macho.write(to: target)
+                        macho = try LCPluginMachO(url: target)
+                    }
+                    guard try macho.containsLoads(loads, absent: remove.subtracting(loads), weak: options.weak),
+                          try !migrateTweakLoader || !macho.dependencies.contains(where: { ($0 as NSString).lastPathComponent == tweakLoaderName }) else {
                         throw LCPluginError("插件加载项修改回读校验失败。")
                     }
                 } catch {
@@ -231,6 +258,13 @@ struct LCPluginPreparation {
             let manifest = Manifest(revision: 4, executable: executable,
                                     injectedFiles: injectedFiles.sorted(), images: images, options: options)
             try PropertyListEncoder().encode(manifest).write(to: staged.appendingPathComponent(manifestName), options: .atomic)
+            if migrateTweakLoader {
+                guard let stagedInfo = LCAppInfo(bundlePath: staged.path) else { throw LCPluginError("无法保存插件迁移设置。") }
+                stagedInfo.dontInjectTweakLoader = true
+                stagedInfo.dontLoadTweakLoader = true
+                stagedInfo.info().removeObject(forKey: "LCTweakLoaderCantInject")
+                stagedInfo.save()
+            }
             return staged
         } catch {
             try? fm.removeItem(at: staged)
@@ -316,7 +350,7 @@ struct LCPluginPreparation {
         var result: [URL] = []
         for item in try fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isSymbolicLinkKey, .isDirectoryKey]).sorted(by: { $0.path < $1.path }) {
             let name = item.lastPathComponent
-            if name.hasPrefix(".") || name == "__MACOSX" || name.hasSuffix(".disabled") || name == "TweakLoader.dylib" { continue }
+            if name.hasPrefix(".") || name == "__MACOSX" || name.hasSuffix(".disabled") || name == LCPluginMachO.tweakLoaderName { continue }
             let values = try item.resourceValues(forKeys: [.isSymbolicLinkKey, .isDirectoryKey])
             guard values.isSymbolicLink != true else { continue }
             if ["dylib", "framework", "bundle"].contains(item.pathExtension.lowercased()) {

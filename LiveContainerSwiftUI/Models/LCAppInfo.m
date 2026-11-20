@@ -324,13 +324,14 @@
     
     bool is32bit = false;
     if (needPatch) {
+        bool reserveTweakLoaderSlot = ![fm fileExistsAtPath:[appPath stringByAppendingPathComponent:@"LCPluginManifest.plist"]];
         __block bool has64bitSlice = NO;
         __block bool isEncrypted = false;
         NSMutableDictionary *originalAlignments = [info[@"LCOriginalCommonSectionAlignments"] mutableCopy] ?: [NSMutableDictionary new];
         NSString *error = LCParseMachO(execPath.UTF8String, false, ^(const char *path, struct mach_header_64 *header, int fd, void* filePtr) {
             if(header->cputype == CPU_TYPE_ARM64) {
                 has64bitSlice |= YES;
-                int patchResult = LCPatchExecSlice(path, header, ![self dontInjectTweakLoader]);
+                int patchResult = LCPatchExecSlice(path, header, ![self dontInjectTweakLoader], reserveTweakLoaderSlot);
                 LCPatchCommonSectionAlignment(header, self.fixCommonSectionAlignment, originalAlignments);
                 if(patchResult & PATCH_EXEC_RESULT_NO_SPACE_FOR_TWEAKLOADER) {
                     info[@"LCTweakLoaderCantInject"] = @YES;
@@ -364,7 +365,7 @@
             self.classicMode = YES;
             self.spoofSDKVersion = YES;
         }
-        error = [self patchGuestExtensions];
+        error = [self patchGuestExtensionsReservingTweakLoaderSlot:reserveTweakLoaderSlot];
         if (error) {
             [NSUserDefaults.standardUserDefaults removeObjectForKey:@"SigningInProgress"];
             completetionHandler(NO, error);
@@ -426,7 +427,7 @@
             }
 }
 
-- (NSString *)patchGuestExtensions {
+- (NSString *)patchGuestExtensionsReservingTweakLoaderSlot:(bool)reserveTweakLoaderSlot {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSString *pluginsPath = [self.bundlePath stringByAppendingPathComponent:@"PlugIns"];
     NSArray *plugins = [fm contentsOfDirectoryAtPath:pluginsPath error:nil];
@@ -451,7 +452,7 @@
             hasARM64 = YES;
             encrypted |= LCIsMachOEncrypted(header);
             if (!encrypted) {
-                mismatch |= (LCPatchExecSlice(path.fileSystemRepresentation, header, false) & PATCH_EXEC_RESULT_SEG_COUNT_MISMATCH) != 0;
+                mismatch |= (LCPatchExecSlice(path.fileSystemRepresentation, header, false, reserveTweakLoaderSlot) & PATCH_EXEC_RESULT_SEG_COUNT_MISMATCH) != 0;
             }
         });
         if (!error && (!hasARM64 || encrypted)) {

@@ -148,7 +148,7 @@ void LCPatchCommonSectionAlignment(struct mach_header_64 *header, bool enabled, 
     }
 }
 
-int LCPatchExecSlice(const char *path, struct mach_header_64 *header, bool doInject) {
+int LCPatchExecSlice(const char *path, struct mach_header_64 *header, bool doInject, bool reserveTweakLoaderSlot) {
     uint8_t *imageHeaderPtr = (uint8_t*)header + sizeof(struct mach_header_64);
     int ans = 0;
     // Literally convert an executable to a dylib
@@ -232,7 +232,7 @@ int LCPatchExecSlice(const char *path, struct mach_header_64 *header, bool doInj
     if (dylibLoaderCommand) {
         dylibLoaderCommand->cmd = doInject ? LC_LOAD_DYLIB : 0x114514;
         strcpy((void *)dylibLoaderCommand + dylibLoaderCommand->dylib.name.offset, doInject ? tweakLoaderPath : libCppPath);
-    } else  {
+    } else if (doInject || reserveTweakLoaderSlot) {
         if (freeLoadCommandCountLeft >= tweakLoaderLoadDylibCmdSize) {
             freeLoadCommandCountLeft -= tweakLoaderLoadDylibCmdSize;
             insertDylibCommand(doInject ? LC_LOAD_DYLIB : 0x114514, doInject ? tweakLoaderPath : libCppPath, header);
