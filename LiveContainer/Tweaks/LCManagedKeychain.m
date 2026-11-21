@@ -80,134 +80,9 @@ static id LCKeychainByteAttribute(id value) {
     return [value isKindOfClass:NSString.class] ? [value dataUsingEncoding:NSUTF8StringEncoding] : value;
 }
 
-static OSStatus LCValidateTemporaryKeyOptions(id input, BOOL allowKeyDictionaries, BOOL softwareToken,
-                                              NSDictionary **validated, NSString **reason) {
-    NSDictionary *options = [input isKindOfClass:NSDictionary.class] ? [input copy] : nil;
-    if (![options isKindOfClass:NSDictionary.class]) {
-        *reason = @"invalid-key-parameters";
-        return errSecParam;
-    }
-    static NSSet *softwareOptions;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        softwareOptions = [NSSet setWithArray:@[KC(kSecAttrKeyType), KC(kSecAttrKeyClass),
-            KC(kSecAttrKeySizeInBits), KC(kSecAttrEffectiveKeySize), KC(kSecAttrLabel),
-            KC(kSecAttrCanEncrypt), KC(kSecAttrCanDecrypt),
-            KC(kSecAttrCanDerive), KC(kSecAttrCanSign), KC(kSecAttrCanVerify),
-            KC(kSecAttrCanWrap), KC(kSecAttrCanUnwrap)]];
-    });
-    NSMutableDictionary *safe = options.mutableCopy;
-    for (id key in options) {
-        id value = options[key];
-        if ([key isEqual:KC(kSecAttrIsPermanent)]) {
-            if (!LCKeychainIsBoolean(value)) {
-                *reason = @"invalid-key-permanence";
-                return errSecParam;
-            }
-            if (![value boolValue]) continue;
-            *reason = @"persistent-key";
-        } else if ([key isEqual:KC(kSecPublicKeyAttrs)] || [key isEqual:KC(kSecPrivateKeyAttrs)]) {
-            if (allowKeyDictionaries) {
-                NSDictionary *child = nil;
-                OSStatus status = LCValidateTemporaryKeyOptions(value, NO, softwareToken, &child, reason);
-                if (status != errSecSuccess) return status;
-                safe[key] = child;
-                continue;
-            }
-            *reason = @"unsupported-key-attributes-dictionary";
-        } else if ([key isEqual:KC(kSecAttrTokenID)]) {
-            if (![value isKindOfClass:NSString.class] || ![value length]) {
-                *reason = @"invalid-token-id";
-                return errSecParam;
-            }
-            if (!softwareToken) {
-                *reason = [value isEqual:KC(kSecAttrTokenIDSecureEnclave)] ? @"secure-enclave-token" : @"unsupported-token-id";
-            } else {
-                [safe removeObjectForKey:key];
-                continue;
-            }
-        } else if ([key isEqual:KC(kSecAttrAccessControl)] || [key isEqual:KC(kSecAttrAccessible)] ||
-                   [key isEqual:KC(kSecUseAuthenticationContext)]) {
-            if (softwareToken) {
-                [safe removeObjectForKey:key];
-                continue;
-            }
-            *reason = @"protected-key";
-        } else if ([key isEqual:KC(kSecAttrApplicationTag)]) {
-            id tag = LCKeychainByteAttribute(value);
-            if (![tag isKindOfClass:NSData.class]) {
-                *reason = @"invalid-application-tag";
-                return errSecParam;
-            }
-            safe[key] = tag;
-            continue;
-        } else if ([softwareOptions containsObject:key]) {
-            continue;
-        } else {
-            *reason = @"unsupported-key-option";
-        }
-        return errSecUnimplemented;
-    }
-    if (allowKeyDictionaries) safe[KC(kSecAttrIsPermanent)] = @NO;
-    *validated = safe.copy;
-    return errSecSuccess;
-}
-
 static OSStatus LCKeyCreationErrorStatus(CFErrorRef error) {
     return error && CFEqual(CFErrorGetDomain(error), kCFErrorDomainOSStatus) ?
         (OSStatus)CFErrorGetCode(error) : errSecInternalComponent;
-}
-
-static NSString *LCKeychainFailureReason(NSString *reason, BOOL softwareToken) {
-    return softwareToken && ![reason hasPrefix:@"token-"] ? [@"token-" stringByAppendingString:reason] : reason;
-}
-
-static BOOL LCKeychainTokenRequest(NSDictionary *parameters) {
-    if (parameters[KC(kSecAttrTokenID)]) return YES;
-    for (NSString *key in @[KC(kSecPrivateKeyAttrs), KC(kSecPublicKeyAttrs)]) {
-        NSDictionary *child = parameters[key];
-        if ([child isKindOfClass:NSDictionary.class] && child[KC(kSecAttrTokenID)]) return YES;
-    }
-    return NO;
-}
-
-static SecKeyRef LCManagedCreateTemporaryKey(NSString *operation, BOOL import, CFDataRef data,
-                                            BOOL softwareToken, CFDictionaryRef parameters, CFErrorRef *error) {
-    if (error) *error = NULL;
-    NSString *reason = nil;
-    NSDictionary *validated = nil;
-    OSStatus status;
-    if (import && ![(__bridge id)data isKindOfClass:NSData.class]) {
-        status = errSecParam;
-        reason = @"invalid-key-data";
-    } else {
-        status = LCValidateTemporaryKeyOptions((__bridge id)parameters, !import, softwareToken, &validated, &reason);
-    }
-    if (status != errSecSuccess) {
-        LCKeychainLogMessage(operation, @"key", status, LCKeychainFailureReason(reason, softwareToken));
-        if (error) *error = CFErrorCreate(NULL, kCFErrorDomainOSStatus, status, NULL);
-        return NULL;
-    }
-
-    CFErrorRef systemError = NULL;
-    CFDictionaryRef safeParameters = (__bridge CFDictionaryRef)validated;
-    SecKeyRef key = import ? SecKeyCreateWithData(data, safeParameters, &systemError) :
-        SecKeyCreateRandomKey(safeParameters, &systemError);
-    if (!key) LCKeychainLogMessage(operation, @"key", LCKeyCreationErrorStatus(systemError),
-        softwareToken ? @"token-temporary-key-create-failed" : @"temporary-key-create-failed");
-    else if (softwareToken && import) LCKeychainLogMessage(operation, @"key", errSecSuccess, @"token-key-import-software-emulated");
-    if (error) *error = systemError;
-    else if (systemError) CFRelease(systemError);
-    return key;
-}
-
-SecKeyRef LCManagedCreateKeyWithData(CFDataRef data, CFDictionaryRef parameters, CFErrorRef *error) {
-    NSDictionary *input = [(__bridge id)parameters isKindOfClass:NSDictionary.class] ? (__bridge NSDictionary *)parameters : nil;
-    BOOL softwareToken = input && LCKeychainTokenRequest(input);
-    SecKeyRef key = LCManagedCreateTemporaryKey(@"SecKeyCreateWithData", YES, data, softwareToken, parameters, error);
-    // Security can report a memory-only import as permanent. Track the exact object, not its key material.
-    if (key && !softwareToken) objc_setAssociatedObject((__bridge id)key, &LCKeychainOwnedSoftwareKeyMarker, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    return key;
 }
 
 static NSDictionary<NSString *, NSNumber *> *LCKeychainAccessibilityBuckets(void) {
@@ -297,6 +172,18 @@ static OSStatus LCKeychainNormalizeACL(NSDictionary *__strong *input, BOOL passw
     return errSecUnimplemented;
 }
 
+static NSString *LCKeychainOptionValueType(id value) {
+    if ([value isKindOfClass:NSString.class]) return @"string";
+    if (LCKeychainIsBoolean(value)) return @"boolean";
+    if ([value isKindOfClass:NSNumber.class]) return @"number";
+    if ([value isKindOfClass:NSData.class]) return @"data";
+    if ([value isKindOfClass:NSDate.class]) return @"date";
+    if ([value isKindOfClass:NSArray.class]) return @"array";
+    if ([value isKindOfClass:NSDictionary.class]) return @"dictionary";
+    if (value == NSNull.null) return @"null";
+    return @"other";
+}
+
 static NSString *LCKeychainSafeOption(id key, id value, NSDictionary *types) {
     // Never echo arbitrary dictionary keys or attribute values into diagnostics.
     static NSArray<NSString *> *known;
@@ -324,15 +211,7 @@ static NSString *LCKeychainSafeOption(id key, id value, NSDictionary *types) {
             if ([attribute isEqual:key]) { name = attribute; break; }
         }
     }
-    NSString *valueType = @"other";
-    if ([value isKindOfClass:NSString.class]) valueType = @"string";
-    else if (LCKeychainIsBoolean(value)) valueType = @"boolean";
-    else if ([value isKindOfClass:NSNumber.class]) valueType = @"number";
-    else if ([value isKindOfClass:NSData.class]) valueType = @"data";
-    else if ([value isKindOfClass:NSDate.class]) valueType = @"date";
-    else if ([value isKindOfClass:NSArray.class]) valueType = @"array";
-    else if ([value isKindOfClass:NSDictionary.class]) valueType = @"dictionary";
-    else if (value == NSNull.null) valueType = @"null";
+    NSString *valueType = LCKeychainOptionValueType(value);
     return name ? [NSString stringWithFormat:@"unsupported-option:%@ value-type=%@", name, valueType] :
         [NSString stringWithFormat:@"unsupported-or-invalid-option field=unknown value-type=%@", valueType];
 }
@@ -1023,8 +902,8 @@ static BOOL LCKeychainSystemIsEmpty(LCKeychainMigration *migration) {
 }
 
 static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operation, CFDictionaryRef input,
-                                  CFDictionaryRef updates, CFTypeRef *result, NSDictionary *additionalKey,
-                                  LCKeychainLegacyRead legacyRead, LCKeychainMigration *migration) {
+                                  CFDictionaryRef updates, CFTypeRef *result, NSArray<NSMutableDictionary *> *preparedKeys,
+                                  LCKeychainLegacyRead legacyRead, LCKeychainMigration *migration, NSString *__strong *failureReason) {
     if (result) *result = NULL;
     NSString *op = @[@"add", @"copy", @"update", @"delete"][operation];
     NSDictionary *options = (__bridge NSDictionary *)input;
@@ -1052,7 +931,8 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
     if ([itemClass isEqual:KC(kSecClassCertificate)]) className = @"certificate";
     if ([itemClass isEqual:KC(kSecClassIdentity)]) className = @"identity";
     OSStatus (^fail)(OSStatus, NSString *) = ^OSStatus(OSStatus status, NSString *reason) {
-        if (status != errSecItemNotFound) LCKeychainLogMessage(op, className, status, reason);
+        if (failureReason) *failureReason = reason;
+        else if (status != errSecItemNotFound) LCKeychainLogMessage(op, className, status, reason);
         return status;
     };
     NSMutableSet<NSData *> *recordRefs = nil;
@@ -1271,7 +1151,7 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
             if (!attributes[KC(kSecValueData)]) return fail(errSecDecode, @"invalid-certificate");
         }
     }
-    if (keyItem && operation == LCKeychainAdd) {
+    if (keyItem && operation == LCKeychainAdd && !preparedKeys) {
         if ((valueReference && attributes[KC(kSecValueData)]) ||
             [attributes[KC(kSecAttrIsPermanent)] isEqual:@NO]) return fail(errSecParam, @"invalid-key-add");
         NSString *keyReason = nil;
@@ -1402,7 +1282,7 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
         NSIndexSet *updatedIndexes = nil;
         if (operation == LCKeychainAdd) {
             NSDate *now = NSDate.date;
-            NSArray *newItems = additionalKey ? @[attributes, additionalKey.mutableCopy] :
+            NSArray *newItems = preparedKeys ?:
                 identityKey ? @[attributes, identityKey.mutableCopy] : @[attributes];
             if (identityKey) {
                 // Reuse either component if it was already stored separately; never replace it.
@@ -1768,132 +1648,227 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
 
 OSStatus LCManagedKeychainPerform(NSURL *directory, LCKeychainOperation operation,
                                   CFDictionaryRef input, CFDictionaryRef updates, CFTypeRef *result) {
-    return LCKeychainPerform(directory, operation, input, updates, result, nil, nil, nil);
+    return LCKeychainPerform(directory, operation, input, updates, result, nil, nil, nil, NULL);
 }
 
 OSStatus LCManagedKeychainPerformWithLegacyRead(NSURL *directory, LCKeychainOperation operation,
     CFDictionaryRef input, CFDictionaryRef updates, CFTypeRef *result, LCKeychainLegacyRead legacyRead) {
-    return LCKeychainPerform(directory, operation, input, updates, result, nil, legacyRead, nil);
+    return LCKeychainPerform(directory, operation, input, updates, result, nil, legacyRead, nil, NULL);
 }
 
 OSStatus LCManagedKeychainPerformMigrating(NSURL *directory, LCKeychainMigration *migration,
     LCKeychainOperation operation, CFDictionaryRef input, CFDictionaryRef updates, CFTypeRef *result) {
-    return LCKeychainPerform(directory, operation, input, updates, result, nil, nil, migration);
+    return LCKeychainPerform(directory, operation, input, updates, result, nil, nil, migration, NULL);
 }
 
-static NSDictionary *LCKeychainGenerationRecord(NSDictionary *common, NSDictionary *specific, SecKeyRef key) {
-    NSMutableDictionary *record = common.mutableCopy;
-    if (specific) [record addEntriesFromDictionary:specific];
-    if (![record[KC(kSecAttrIsPermanent)] boolValue]) return nil;
-    [record removeObjectForKey:KC(kSecAttrIsPermanent)];
-    record[KC(kSecClass)] = KC(kSecClassKey);
-    record[KC(kSecValueRef)] = (__bridge id)key;
-    return record;
+static NSString *LCKeychainKeyParameterReason(NSString *location, id key, id value, NSString *problem) {
+    static NSCharacterSet *nonIdentifier;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        nonIdentifier = [NSCharacterSet characterSetWithCharactersInString:
+            @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-"].invertedSet;
+    });
+    NSString *field = [key isKindOfClass:NSString.class] && [key length] > 0 && [key length] <= 64 &&
+        [key rangeOfCharacterFromSet:nonIdentifier].location == NSNotFound ? key : @"unavailable";
+    return [NSString stringWithFormat:@"phase=parameters location=%@ field=%@ value-type=%@ issue=%@",
+        location, field, value ? LCKeychainOptionValueType(value) : @"missing", problem];
+}
+
+static OSStatus LCKeychainParseKeyOptions(id input, BOOL import, NSDictionary **native,
+    NSArray<NSDictionary *> **storage, BOOL *softwareToken, NSString **reason) {
+    NSString *root = import ? @"import" : @"top";
+    if (![input isKindOfClass:NSDictionary.class]) {
+        *reason = LCKeychainKeyParameterReason(root, @"parameters", input, @"expected-dictionary");
+        return errSecParam;
+    }
+    NSDictionary *options = input;
+    NSString *privateAttrs = KC(kSecPrivateKeyAttrs), *publicAttrs = KC(kSecPublicKeyAttrs);
+    NSString *token = KC(kSecAttrTokenID), *permanent = KC(kSecAttrIsPermanent);
+    NSDictionary *privateOptions = options[privateAttrs], *publicOptions = options[publicAttrs];
+    if (import && (privateOptions || publicOptions)) {
+        *reason = LCKeychainKeyParameterReason(root, privateOptions ? privateAttrs : publicAttrs,
+            privateOptions ?: publicOptions, @"unsupported-key-attributes-dictionary");
+        return errSecUnimplemented;
+    }
+    if ((privateOptions && ![privateOptions isKindOfClass:NSDictionary.class]) ||
+        (publicOptions && ![publicOptions isKindOfClass:NSDictionary.class])) {
+        BOOL invalidPrivate = privateOptions && ![privateOptions isKindOfClass:NSDictionary.class];
+        *reason = LCKeychainKeyParameterReason(root, invalidPrivate ? privateAttrs : publicAttrs,
+            invalidPrivate ? privateOptions : publicOptions, @"expected-dictionary");
+        return errSecParam;
+    }
+    *softwareToken = options[token] || privateOptions[token] || publicOptions[token];
+    NSArray *levels = import ? @[options] : @[options, privateOptions ?: @{}, publicOptions ?: @{}];
+    NSArray *locations = @[root, @"private", @"public"];
+    NSDictionary *types = LCKeychainAttributeTypes(KC(kSecClassKey));
+    NSMutableDictionary *crypto = [NSMutableDictionary dictionary];
+    NSMutableArray<NSDictionary *> *records = [NSMutableArray array];
+    for (NSUInteger index = 0; index < levels.count; index++) {
+        NSString *location = locations[index];
+        NSDictionary *level = levels[index];
+        if (!*softwareToken) {
+            OSStatus status = LCKeychainNormalizeACL(&level, NO, reason);
+            if (status != errSecSuccess) {
+                NSString *field = levels[index][KC(kSecAttrAccessControl)] ? KC(kSecAttrAccessControl) : KC(kSecAttrAccessible);
+                *reason = LCKeychainKeyParameterReason(location, field, levels[index][field], *reason);
+                return status;
+            }
+        }
+        NSMutableDictionary *record = [NSMutableDictionary dictionary];
+        for (id field in level) {
+            id value = level[field];
+            BOOL valid = YES;
+            if (!index && ([field isEqual:privateAttrs] || [field isEqual:publicAttrs])) continue;
+            if ([field isEqual:token]) {
+                valid = [value isKindOfClass:NSString.class] && [value length] > 0;
+            } else if ([field isEqual:KC(kSecAttrAccessControl)]) {
+                valid = CFGetTypeID((__bridge CFTypeRef)value) == SecAccessControlGetTypeID();
+            } else if ([field isEqual:KC(kSecUseAuthenticationContext)]) {
+                valid = [value isKindOfClass:LAContext.class];
+            } else if ([field isEqual:KC(kSecUseDataProtectionKeychain)]) {
+                // Routing hints never select a different backend for an LC key.
+                valid = LCKeychainIsBoolean(value);
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            } else if ([field isEqual:KC(kSecUseNoAuthenticationUI)]) {
+                valid = LCKeychainIsBoolean(value);
+            } else if ([field isEqual:KC(kSecUseOperationPrompt)]) {
+                valid = [value isKindOfClass:NSString.class];
+            } else if ([field isEqual:KC(kSecUseAuthenticationUI)]) {
+                valid = [value isEqual:KC(kSecUseAuthenticationUIAllow)] || [value isEqual:KC(kSecUseAuthenticationUIFail)];
+#pragma clang diagnostic pop
+            } else if ([field isEqual:KC(kSecAttrIsExtractable)] || (import && [field isEqual:permanent])) {
+                valid = LCKeychainIsBoolean(value);
+                if (valid) {
+                    BOOL persistence = [field isEqual:permanent];
+                    BOOL unsupported = persistence ? [value boolValue] : ![value boolValue];
+                    if (unsupported) {
+                        *reason = LCKeychainKeyParameterReason(location, field, value,
+                            persistence ? @"use-SecItemAdd-to-persist-import" : @"nonexportable-software-key");
+                        return errSecUnimplemented;
+                    }
+                }
+            } else if ([field isEqual:KC(kSecAttrKeyType)] || [field isEqual:KC(kSecAttrKeyClass)] ||
+                       [field isEqual:KC(kSecAttrKeySizeInBits)]) {
+                valid = LCKeychainValidAttribute(field, value, types, NO) ||
+                    (import && ![field isEqual:KC(kSecAttrKeySizeInBits)] && [value isKindOfClass:NSNumber.class] &&
+                     !LCKeychainIsBoolean(value));
+                // Generation always takes its algorithm and size from the top level.
+                if (valid && !index && (import || ![field isEqual:KC(kSecAttrKeyClass)])) crypto[field] = value;
+            } else if ([field isKindOfClass:NSString.class] && types[field]) {
+                id normalized = [field isEqual:KC(kSecAttrApplicationTag)] ? LCKeychainByteAttribute(value) : value;
+                valid = *softwareToken && [field isEqual:KC(kSecAttrAccessible)] ? [value isKindOfClass:NSString.class] :
+                    LCKeychainValidAttribute(field, normalized, types, NO);
+                if (valid && !import && !(*softwareToken && [field isEqual:KC(kSecAttrAccessible)])) record[field] = normalized;
+            } else {
+                *reason = LCKeychainKeyParameterReason(location, field, value, @"unsupported-key-option");
+                return errSecUnimplemented;
+            }
+            if (!valid) {
+                *reason = LCKeychainKeyParameterReason(location, field, value, @"invalid-value");
+                return errSecParam;
+            }
+        }
+        if (!import) [records addObject:record];
+    }
+    NSString *keyType = KC(kSecAttrKeyType), *shape = import ? KC(kSecAttrKeyClass) : KC(kSecAttrKeySizeInBits);
+    if (!crypto[keyType] || !crypto[shape]) {
+        *reason = LCKeychainKeyParameterReason(root, !crypto[keyType] ? keyType : shape, nil, @"missing-required-field");
+        return errSecParam;
+    }
+    if (!import) {
+        // No guest routing or persistence option reaches Security.framework.
+        crypto[permanent] = @NO;
+        NSMutableDictionary *privateRecord = [records[0] mutableCopy], *publicRecord = [records[0] mutableCopy];
+        [privateRecord addEntriesFromDictionary:records[1]];
+        [publicRecord addEntriesFromDictionary:records[2]];
+        if (!privateRecord[permanent] && (options[token] || privateOptions[token])) privateRecord[permanent] = @YES;
+        *storage = @[privateRecord, publicRecord];
+    }
+    *native = crypto;
+    return errSecSuccess;
+}
+
+static SecKeyRef LCKeychainKeyFailure(NSString *operation, OSStatus status, NSString *reason,
+                                      BOOL softwareToken, CFErrorRef *error) {
+    LCKeychainLogMessage(operation, @"key", status, softwareToken ? [reason stringByAppendingString:@" backend=software-token"] : reason);
+    if (error) *error = CFErrorCreate(NULL, kCFErrorDomainOSStatus, status, NULL);
+    return NULL;
+}
+
+SecKeyRef LCManagedCreateKeyWithData(CFDataRef data, CFDictionaryRef parameters, CFErrorRef *error) {
+    if (error) *error = NULL;
+    NSString *operation = @"SecKeyCreateWithData", *reason = nil;
+    if (![(__bridge id)data isKindOfClass:NSData.class]) {
+        reason = LCKeychainKeyParameterReason(@"import", @"keyData", (__bridge id)data, @"expected-data");
+        return LCKeychainKeyFailure(operation, errSecParam, reason, NO, error);
+    }
+    NSDictionary *native = nil;
+    BOOL softwareToken = NO;
+    OSStatus status = LCKeychainParseKeyOptions((__bridge id)parameters, YES, &native, NULL, &softwareToken, &reason);
+    if (status != errSecSuccess) return LCKeychainKeyFailure(operation, status, reason, softwareToken, error);
+    CFErrorRef nativeError = NULL;
+    SecKeyRef key = SecKeyCreateWithData(data, (__bridge CFDictionaryRef)native, &nativeError);
+    if (!key) LCKeychainLogMessage(operation, @"key", LCKeyCreationErrorStatus(nativeError), @"phase=crypto issue=import-failed");
+    else if (softwareToken) LCKeychainLogMessage(operation, @"key", errSecSuccess, @"token-key-import-software-emulated");
+    else objc_setAssociatedObject((__bridge id)key, &LCKeychainOwnedSoftwareKeyMarker, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (error) *error = nativeError;
+    else if (nativeError) CFRelease(nativeError);
+    return key;
 }
 
 static SecKeyRef LCManagedGenerateSoftwareKey(NSURL *directory, NSString *operation, CFDictionaryRef parameters,
                                                SecKeyRef *publicKey, CFErrorRef *error) CF_RETURNS_RETAINED {
     if (publicKey) *publicKey = NULL;
     if (error) *error = NULL;
-    id input = (__bridge id)parameters;
-    NSDictionary *options = [input isKindOfClass:NSDictionary.class] ? [input copy] : nil;
-    NSDictionary *privateOptions = options[KC(kSecPrivateKeyAttrs)], *publicOptions = options[KC(kSecPublicKeyAttrs)];
-    NSArray *locations = @[options ?: @{}, privateOptions ?: @{}, publicOptions ?: @{}];
-    NSMutableArray *native = [NSMutableArray arrayWithCapacity:3], *stored = [NSMutableArray arrayWithCapacity:3];
-    OSStatus status = options ? errSecSuccess : errSecParam;
-    NSString *reason = @"invalid-key-parameters";
-    BOOL softwareToken = options && LCKeychainTokenRequest(options);
-    if (softwareToken) {
-        for (id location in locations) {
-            id token = [location isKindOfClass:NSDictionary.class] ? location[KC(kSecAttrTokenID)] : nil;
-            if (token && (![token isKindOfClass:NSString.class] || ![token length])) {
-                status = errSecParam; reason = @"invalid-token-id";
-                break;
-            }
-        }
-    }
-    for (id location in locations) {
-        if (status != errSecSuccess) break;
-        if (![location isKindOfClass:NSDictionary.class]) { status = errSecParam; break; }
-        NSDictionary *normalized = location;
-        if (!softwareToken) {
-            status = LCKeychainNormalizeACL(&normalized, NO, &reason);
-            if (status != errSecSuccess) break;
-        }
-        NSMutableDictionary *crypto = normalized.mutableCopy, *record = [NSMutableDictionary dictionary];
-        id context = crypto[KC(kSecUseAuthenticationContext)];
-        if (!softwareToken && context && ![context isKindOfClass:LAContext.class]) {
-            status = errSecParam; reason = @"invalid-authentication-context"; break;
-        }
-        [crypto removeObjectForKey:KC(kSecUseAuthenticationContext)];
-        if (!native.count) {
-            [crypto removeObjectForKey:KC(kSecPrivateKeyAttrs)];
-            [crypto removeObjectForKey:KC(kSecPublicKeyAttrs)];
-        }
-        for (NSString *name in @[KC(kSecAttrIsPermanent), KC(kSecAttrApplicationTag), KC(kSecAttrLabel),
-                                 KC(kSecAttrAccessible), KC(kSecAttrAccessGroup), KC(kSecAttrSynchronizable)]) {
-            id value = crypto[name];
-            if (!value) continue;
-            if (softwareToken && [name isEqual:KC(kSecAttrAccessible)]) {
-                [crypto removeObjectForKey:name];
-                continue;
-            }
-            if ([name isEqual:KC(kSecAttrApplicationTag)]) value = LCKeychainByteAttribute(value);
-            if (!LCKeychainValidAttribute(name, value, LCKeychainAttributeTypes(KC(kSecClassKey)), NO)) {
-                status = errSecParam; reason = @"unsupported-key-storage-option"; break;
-            }
-            record[name] = value;
-            [crypto removeObjectForKey:name];
-        }
-        if (softwareToken) {
-            [crypto removeObjectForKey:KC(kSecAttrTokenID)];
-            [crypto removeObjectForKey:KC(kSecAttrAccessControl)];
-        }
-        for (NSString *name in LCKeychainKeyUsageAttributes()) {
-            if (crypto[name]) record[name] = crypto[name];
-        }
-        [native addObject:crypto.copy];
-        [stored addObject:record.copy];
-    }
-    if (status != errSecSuccess) {
-        LCKeychainLogMessage(operation, @"key", status, LCKeychainFailureReason(reason, softwareToken));
-        if (error) *error = CFErrorCreate(NULL, kCFErrorDomainOSStatus, status, NULL);
+    NSString *reason = nil;
+    NSDictionary *native = nil;
+    NSArray<NSDictionary *> *storage = nil;
+    BOOL softwareToken = NO;
+    OSStatus status = LCKeychainParseKeyOptions((__bridge id)parameters, NO, &native, &storage, &softwareToken, &reason);
+    if (status != errSecSuccess) return LCKeychainKeyFailure(operation, status, reason, softwareToken, error);
+
+    CFErrorRef nativeError = NULL;
+    SecKeyRef private = SecKeyCreateRandomKey((__bridge CFDictionaryRef)native, &nativeError);
+    if (!private) {
+        LCKeychainLogMessage(operation, @"key", LCKeyCreationErrorStatus(nativeError), @"phase=crypto issue=generate-failed");
+        if (error) *error = nativeError;
+        else if (nativeError) CFRelease(nativeError);
         return NULL;
     }
-    NSMutableDictionary *crypto = [native[0] mutableCopy];
-    if (privateOptions) crypto[KC(kSecPrivateKeyAttrs)] = native[1];
-    if (publicOptions) crypto[KC(kSecPublicKeyAttrs)] = native[2];
-    SecKeyRef private = LCManagedCreateTemporaryKey(operation, NO, NULL, softwareToken, (__bridge CFDictionaryRef)crypto, error);
-    if (!private) return NULL;
-
-    // Mark keys at creation so callers can also persist them in a later SecItemAdd.
-    objc_setAssociatedObject((__bridge id)private, &LCKeychainOwnedSoftwareKeyMarker, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    NSDictionary *privateRecord = LCKeychainGenerationRecord(stored[0], stored[1], private);
-    id shouldStorePublic = stored[2][KC(kSecAttrIsPermanent)] ?: stored[0][KC(kSecAttrIsPermanent)];
-    SecKeyRef public = (publicKey || [shouldStorePublic boolValue]) ? SecKeyCopyPublicKey(private) : NULL;
-    if (public) objc_setAssociatedObject((__bridge id)public, &LCKeychainOwnedSoftwareKeyMarker, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    if ((publicKey || [shouldStorePublic boolValue]) && !public) {
-        status = errSecInternalComponent; reason = @"temporary-public-key-unavailable";
-    } else if (privateRecord || [shouldStorePublic boolValue]) {
-        NSDictionary *publicRecord = public ? LCKeychainGenerationRecord(stored[0], stored[2], public) : nil;
-        NSMutableDictionary *second = privateRecord && publicRecord ? publicRecord.mutableCopy : nil;
-        if (second) {
-            id reference = second[KC(kSecValueRef)];
-            [second removeObjectForKey:KC(kSecValueRef)];
-            status = LCKeychainPrepareKey(second, reference, NO, &reason);
-            if (status != errSecSuccess) reason = LCKeychainFailureReason(reason, softwareToken);
+    if (nativeError) CFRelease(nativeError);
+    NSString *permanent = KC(kSecAttrIsPermanent);
+    BOOL storePublic = [storage[1][permanent] boolValue];
+    SecKeyRef public = (publicKey || storePublic) ? SecKeyCopyPublicKey(private) : NULL;
+    if ((publicKey || storePublic) && !public) {
+        status = errSecInternalComponent;
+        reason = @"phase=crypto location=public issue=public-key-unavailable";
+    } else {
+        objc_setAssociatedObject((__bridge id)private, &LCKeychainOwnedSoftwareKeyMarker, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        if (public) objc_setAssociatedObject((__bridge id)public, &LCKeychainOwnedSoftwareKeyMarker, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        NSMutableArray *prepared = [NSMutableArray arrayWithCapacity:2];
+        for (NSUInteger index = 0; index < storage.count; index++) {
+            if (![storage[index][permanent] boolValue]) continue;
+            NSMutableDictionary *record = [storage[index] mutableCopy];
+            record[KC(kSecClass)] = KC(kSecClassKey);
+            status = LCKeychainPrepareKey(record, (__bridge id)(index ? public : private), NO, &reason);
+            if (status != errSecSuccess) {
+                reason = [NSString stringWithFormat:@"phase=store location=%@ issue=%@", index ? @"public" : @"private", reason];
+                break;
+            }
+            [prepared addObject:record];
         }
-        if (status == errSecSuccess) {
-            status = LCKeychainPerform(directory, LCKeychainAdd, (__bridge CFDictionaryRef)(privateRecord ?: publicRecord), NULL, NULL, second, nil, nil);
-            if (status != errSecSuccess) reason = softwareToken ? @"token-persistent-key-store-failed" : @"persistent-key-store-failed";
+        if (status == errSecSuccess && prepared.count) {
+            NSDictionary *keyClass = @{KC(kSecClass): KC(kSecClassKey)};
+            status = LCKeychainPerform(directory, LCKeychainAdd, (__bridge CFDictionaryRef)keyClass,
+                NULL, NULL, prepared, nil, nil, &reason);
+            if (status != errSecSuccess) reason = [@"phase=store issue=" stringByAppendingString:reason ?: @"persistent-key-store-failed"];
         }
     }
     if (status != errSecSuccess) {
         if (public) CFRelease(public);
         CFRelease(private);
-        LCKeychainLogMessage(operation, @"key", status, reason);
-        if (error) *error = CFErrorCreate(NULL, kCFErrorDomainOSStatus, status, NULL);
-        return NULL;
+        return LCKeychainKeyFailure(operation, status, reason, softwareToken, error);
     }
     if (publicKey) *publicKey = public;
     else if (public) CFRelease(public);
