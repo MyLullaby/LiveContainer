@@ -560,10 +560,23 @@ extension LCUtils {
 
         // MARK: - Execute only after all preflight checks pass
 
+        var completed: [(URL, URL)] = []
         for (source, destination) in normalizedMoves {
             do {
                 try fileManager.moveItem(at: source, to: destination)
+                completed.append((source, destination))
             } catch {
+                var rollbackFailures: [URL] = []
+                for (original, moved) in completed.reversed() {
+                    do {
+                        try fileManager.moveItem(at: moved, to: original)
+                    } catch {
+                        rollbackFailures.append(moved)
+                    }
+                }
+                if !rollbackFailures.isEmpty {
+                    throw BatchMoveError.rollbackFailed(rollbackFailures, underlying: error)
+                }
                 throw BatchMoveError.moveFailed(
                     source: source,
                     destination: destination,

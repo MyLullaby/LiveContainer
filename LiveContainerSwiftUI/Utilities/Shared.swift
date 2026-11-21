@@ -370,6 +370,7 @@ enum BatchMoveError: LocalizedError {
     case sourceEqualsDestination(URL)
     case moveWouldPlaceDirectoryInsideItself(source: URL, destination: URL)
     case moveFailed(source: URL, destination: URL, underlying: Error)
+    case rollbackFailed([URL], underlying: Error)
 
     var errorDescription: String? {
         switch self {
@@ -399,6 +400,8 @@ enum BatchMoveError: LocalizedError {
             return "Cannot move directory \(source.path) inside itself at \(destination.path)"
         case .moveFailed(let source, let destination, let error):
             return "Failed to move \(source.path) to \(destination.path). \(error)"
+        case .rollbackFailed(let urls, let error):
+            return "Move failed and these items could not be restored: \(urls.map(\.path).joined(separator: ", ")). \(error)"
         }
     }
 

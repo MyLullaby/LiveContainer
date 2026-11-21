@@ -16,6 +16,8 @@ typedef NS_ENUM(NSInteger, LCReturnToLibraryResult) {
 + (NSString*) teamIdentifier;
 + (NSString *)appGroupID;
 + (NSURL*) appGroupPath;
++ (nullable NSURL *)managedKeychainURLForApp:(NSString *)appFolder container:(NSString *)containerID owner:(NSString *)ownerPath
+    NS_SWIFT_NAME(managedKeychainURL(app:container:owner:));
 + (NSString *)certificatePassword;
 + (BOOL)launchToGuestAppWithClassicMode:(NSUInteger)classicMode;
 + (BOOL)launchToGuestAppWithURL:(NSURL *)url;

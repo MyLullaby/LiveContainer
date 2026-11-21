@@ -14,6 +14,18 @@ NSString* FBSOpenApplicationOptionKeyPayloadURL = @"__PayloadURL";
 
 @implementation LCSharedUtils
 
++ (NSURL *)managedKeychainURLForApp:(NSString *)appFolder container:(NSString *)containerID owner:(NSString *)ownerPath {
+    if (!ownerPath.isAbsolutePath || !appFolder.length || !containerID.length) return nil;
+    NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:
+        @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"];
+    NSString *app = [appFolder stringByAddingPercentEncodingWithAllowedCharacters:allowed];
+    NSString *container = [containerID stringByAddingPercentEncodingWithAllowedCharacters:allowed];
+    if (!app.length || !container.length) return nil;
+    NSURL *root = [NSURL fileURLWithPath:ownerPath isDirectory:YES];
+    return [[[root URLByAppendingPathComponent:@"Library/Application Support/LCManagedKeychain" isDirectory:YES]
+        URLByAppendingPathComponent:app isDirectory:YES] URLByAppendingPathComponent:container isDirectory:YES];
+}
+
 + (NSString*) teamIdentifier {
     static NSString* ans = nil;
     static dispatch_once_t onceToken;

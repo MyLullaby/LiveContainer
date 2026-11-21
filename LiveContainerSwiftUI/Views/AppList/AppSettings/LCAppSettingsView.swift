@@ -710,6 +710,21 @@ struct LCAppSettingsView: View {
         }
     }
 
+    private func managedKeychainMoves(toShared: Bool) throws -> [(URL, URL)] {
+        let privateOwner = LCPath.docPath.deletingLastPathComponent().path
+        let sharedOwner = LCPath.lcGroupDocPath.path
+        let sourceOwner = toShared ? privateOwner : sharedOwner
+        let destinationOwner = toShared ? sharedOwner : privateOwner
+        let fm = FileManager.default
+        return try model.uiContainers.compactMap { container in
+            guard let source = LCSharedUtils.managedKeychainURL(app: appInfo.relativeBundlePath, container: container.folderName, owner: sourceOwner),
+                  let destination = LCSharedUtils.managedKeychainURL(app: appInfo.relativeBundlePath, container: container.folderName, owner: destinationOwner),
+                  fm.fileExists(atPath: source.path) else { return nil }
+            try fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            return (source, destination)
+        }
+    }
+
     func moveToAppGroup() async {
         for container in appInfo.containers {
             if let runningLC = LCSharedUtils.getContainerUsingLCScheme(withFolderName: container.folderName) {
@@ -748,7 +763,7 @@ struct LCAppSettingsView: View {
                 ))
             }
             
-            try LCUtils.moveFilesAtomicallyAfterPreflight(moves)
+            try LCUtils.moveFilesAtomicallyAfterPreflight(try managedKeychainMoves(toShared: true) + moves)
             
             for container in model.uiContainers {
                 if container.storageBookMark != nil {
@@ -811,7 +826,7 @@ struct LCAppSettingsView: View {
                 ))
             }
             
-            try LCUtils.moveFilesAtomicallyAfterPreflight(moves)
+            try LCUtils.moveFilesAtomicallyAfterPreflight(try managedKeychainMoves(toShared: false) + moves)
             
             for container in model.uiContainers {
                 if container.storageBookMark != nil {

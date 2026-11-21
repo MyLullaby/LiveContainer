@@ -30,6 +30,7 @@ NSString* containerId = nil;
 
 static NSURL *managedKeychainDirectory;
 static NSString *managedKeychainBundleRoot;
+static LCKeychainMigration *managedKeychainMigration;
 static NSString *managedLegacyGroup;
 static NSString *managedLegacyAlias;
 
@@ -40,72 +41,102 @@ static bool LCManagedKeychainGuestImage(const mach_header_u *header) {
     return [path hasPrefix:managedKeychainBundleRoot];
 }
 
+#define KC(key) ((__bridge NSString *)key)
+
+static NSDictionary *LCManagedSystemScope(NSDictionary *selector) {
+    NSMutableDictionary *query = selector.mutableCopy;
+    query[KC(kSecAttrAccessGroup)] = managedLegacyGroup;
+    query[@"alis"] = managedLegacyAlias;
+    query[KC(kSecAttrSynchronizable)] = @NO;
+    return query;
+}
+
+static OSStatus LCManagedSystemFind(NSDictionary *selector, BOOL includeData, NSArray<NSDictionary *> **records) {
+    NSString *itemClass = selector[KC(kSecClass)];
+    NSData *reference = selector[KC(kSecValuePersistentRef)];
+    NSMutableDictionary *query = reference ? [@{KC(kSecValuePersistentRef): reference} mutableCopy] : LCManagedSystemScope(selector).mutableCopy;
+    query[KC(kSecMatchLimit)] = reference || includeData ? KC(kSecMatchLimitOne) : KC(kSecMatchLimitAll);
+    query[KC(kSecReturnAttributes)] = @YES;
+    query[KC(kSecReturnPersistentRef)] = @YES;
+    if (includeData) query[KC(kSecReturnData)] = @YES;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    query[KC(kSecUseAuthenticationUI)] = KC(kSecUseAuthenticationUIFail);
+#pragma clang diagnostic pop
+    CFTypeRef output = NULL;
+    OSStatus status = orig_SecItemCopyMatching((__bridge CFDictionaryRef)query, &output);
+    id value = CFBridgingRelease(output);
+    if (status != errSecSuccess) return status;
+    NSArray *matches = [value isKindOfClass:NSDictionary.class] ? @[value] : value;
+    if (![matches isKindOfClass:NSArray.class]) return errSecDecode;
+    NSMutableArray *owned = [NSMutableArray arrayWithCapacity:matches.count];
+    NSData *aliasData = [managedLegacyAlias dataUsingEncoding:NSUTF8StringEncoding];
+    for (id entry in matches) {
+        if (![entry isKindOfClass:NSDictionary.class]) return errSecDecode;
+        NSDictionary *record = entry;
+        id alias = record[@"alis"];
+        id resultClass = record[KC(kSecClass)];
+        id resultRef = record[KC(kSecValuePersistentRef)];
+        if ((![alias isEqual:managedLegacyAlias] && ![alias isEqual:aliasData]) ||
+            ![record[KC(kSecAttrAccessGroup)] isEqual:managedLegacyGroup] ||
+            ![record[KC(kSecAttrSynchronizable)] isEqual:@NO] || (resultClass && ![resultClass isEqual:itemClass]) ||
+            (reference && ![resultRef isEqual:reference])) {
+            LCKeychainLogMessage(@"migration-scope", itemClass, errSecMissingEntitlement, @"system-ownership-unverified");
+            return errSecMissingEntitlement;
+        }
+        if (![resultRef isKindOfClass:NSData.class] || ![resultRef length]) return errSecDecode;
+        if (includeData) {
+            id protection = record[KC(kSecAttrAccessible)];
+            id accessControl = record[KC(kSecAttrAccessControl)];
+            BOOL ordinaryProtection = [protection isEqual:KC(kSecAttrAccessibleWhenUnlocked)] ||
+                [protection isEqual:KC(kSecAttrAccessibleAfterFirstUnlock)];
+            id ordinaryACL = ordinaryProtection ? CFBridgingRelease(SecAccessControlCreateWithFlags(NULL,
+                (__bridge CFTypeRef)protection, 0, NULL)) : nil;
+            if (!ordinaryACL || ![ordinaryACL isEqual:accessControl] || record[KC(kSecAttrTokenID)]) {
+                LCKeychainLogMessage(@"legacy-read", itemClass, errSecUnimplemented, @"legacy-protection-not-portable");
+                return errSecUnimplemented;
+            }
+        }
+        NSMutableDictionary *candidate = record.mutableCopy;
+        [candidate removeObjectsForKeys:@[@"alis", KC(kSecAttrAccessControl), KC(kSecAttrAccessGroup)]];
+        candidate[KC(kSecClass)] = itemClass;
+        [owned addObject:candidate];
+    }
+    *records = owned;
+    return owned.count ? errSecSuccess : errSecItemNotFound;
+}
+
+static OSStatus LCManagedSystemRemove(NSString *itemClass, NSData *reference) {
+    NSDictionary *referenceQuery = @{KC(kSecClass): itemClass, KC(kSecValuePersistentRef): reference};
+    NSArray *records = nil;
+    OSStatus status = LCManagedSystemFind(referenceQuery, NO, &records);
+    if (status != errSecSuccess) return status;
+    NSMutableDictionary *query = LCManagedSystemScope(referenceQuery).mutableCopy;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    query[KC(kSecUseAuthenticationUI)] = KC(kSecUseAuthenticationUIFail);
+#pragma clang diagnostic pop
+    status = orig_SecItemDelete((__bridge CFDictionaryRef)query);
+    if (status != errSecSuccess && status != errSecItemNotFound) return status;
+    status = LCManagedSystemFind(referenceQuery, NO, &records);
+    if (status == errSecItemNotFound) return errSecSuccess;
+    return status == errSecSuccess ? errSecNotAvailable : status;
+}
+
 static OSStatus LCManagedAdd(CFDictionaryRef input, CFTypeRef *result) {
-    return LCManagedKeychainPerform(managedKeychainDirectory, LCKeychainAdd, input, NULL, result);
+    return LCManagedKeychainPerformMigrating(managedKeychainDirectory, managedKeychainMigration, LCKeychainAdd, input, NULL, result);
 }
 
 static OSStatus LCManagedCopy(CFDictionaryRef input, CFTypeRef *result) {
-    return LCManagedKeychainPerformWithLegacyRead(managedKeychainDirectory, LCKeychainCopy, input, NULL, result,
-        ^NSMutableDictionary *(NSDictionary *attributes) {
-            if (!managedLegacyGroup || !managedLegacyAlias) return nil;
-            NSString *itemClass = attributes[(__bridge id)kSecClass];
-            NSMutableDictionary *query = attributes.mutableCopy;
-            // Both markers are required; never retry against a wider system scope.
-            query[(__bridge id)kSecAttrAccessGroup] = managedLegacyGroup;
-            query[@"alis"] = managedLegacyAlias;
-            query[(__bridge id)kSecAttrSynchronizable] = @NO;
-            query[(__bridge id)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
-            query[(__bridge id)kSecReturnAttributes] = @YES;
-            query[(__bridge id)kSecReturnData] = @YES;
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-            query[(__bridge id)kSecUseAuthenticationUI] = (__bridge id)kSecUseAuthenticationUIFail;
-#pragma clang diagnostic pop
-            CFTypeRef output = NULL;
-            OSStatus status = orig_SecItemCopyMatching((__bridge CFDictionaryRef)query, &output);
-            id value = CFBridgingRelease(output);
-            if (status != errSecSuccess) {
-                if (status != errSecItemNotFound) LCKeychainLogMessage(@"legacy-read", itemClass, status, @"system-read-failed");
-                return nil;
-            }
-            if (![value isKindOfClass:NSDictionary.class]) {
-                LCKeychainLogMessage(@"legacy-read", itemClass, errSecDecode, @"unexpected-result-shape");
-                return nil;
-            }
-            NSDictionary *record = value;
-            id alias = record[@"alis"];
-            if ((![alias isEqual:managedLegacyAlias] &&
-                 ![alias isEqual:[managedLegacyAlias dataUsingEncoding:NSUTF8StringEncoding]]) ||
-                ![record[(__bridge id)kSecAttrAccessGroup] isEqual:managedLegacyGroup]) {
-                LCKeychainLogMessage(@"legacy-read", itemClass, errSecUnimplemented, @"legacy-scope-unverified");
-                return nil;
-            }
-            id protection = record[(__bridge id)kSecAttrAccessible];
-            id accessControl = record[(__bridge id)kSecAttrAccessControl];
-            BOOL ordinaryProtection = [protection isEqual:(__bridge id)kSecAttrAccessibleWhenUnlocked] ||
-                [protection isEqual:(__bridge id)kSecAttrAccessibleAfterFirstUnlock];
-            // A missing or non-default ACL cannot establish that the item is safe to copy.
-            id ordinaryACL = ordinaryProtection ? CFBridgingRelease(SecAccessControlCreateWithFlags(NULL,
-                (__bridge CFTypeRef)protection, 0, NULL)) : nil;
-            if (!ordinaryACL || ![ordinaryACL isEqual:accessControl] || record[(__bridge id)kSecAttrTokenID] ||
-                ![record[(__bridge id)kSecAttrSynchronizable] isEqual:@NO]) {
-                LCKeychainLogMessage(@"legacy-read", itemClass, errSecUnimplemented, @"legacy-protection-not-portable");
-                return nil;
-            }
-            NSMutableDictionary *candidate = record.mutableCopy;
-            [candidate removeObjectsForKeys:@[@"alis", (__bridge id)kSecAttrAccessControl, (__bridge id)kSecAttrAccessGroup]];
-            candidate[(__bridge id)kSecClass] = itemClass;
-            candidate[(__bridge id)kSecAttrSynchronizable] = @NO;
-            return candidate;
-        });
+    return LCManagedKeychainPerformMigrating(managedKeychainDirectory, managedKeychainMigration, LCKeychainCopy, input, NULL, result);
 }
 
 static OSStatus LCManagedUpdate(CFDictionaryRef input, CFDictionaryRef updates) {
-    return LCManagedKeychainPerform(managedKeychainDirectory, LCKeychainUpdate, input, updates, NULL);
+    return LCManagedKeychainPerformMigrating(managedKeychainDirectory, managedKeychainMigration, LCKeychainUpdate, input, updates, NULL);
 }
 
 static OSStatus LCManagedDelete(CFDictionaryRef input) {
-    return LCManagedKeychainPerform(managedKeychainDirectory, LCKeychainDelete, input, NULL, NULL);
+    return LCManagedKeychainPerformMigrating(managedKeychainDirectory, managedKeychainMigration, LCKeychainDelete, input, NULL, NULL);
 }
 
 static SecKeyRef LCManagedRandomKey(CFDictionaryRef parameters, CFErrorRef *error) {
@@ -116,20 +147,32 @@ static OSStatus LCManagedKeyPair(CFDictionaryRef parameters, SecKeyRef *publicKe
     return LCManagedGenerateKeyPair(managedKeychainDirectory, parameters, publicKey, privateKey);
 }
 
-BOOL LCManagedKeychainHooksInit(NSString *bundlePath, NSString *containerPath) {
-    if (!bundlePath.isAbsolutePath || !containerPath.isAbsolutePath) {
+NSURL *LCManagedKeychainActiveDirectory(void) {
+    return managedKeychainDirectory;
+}
+
+BOOL LCManagedKeychainHooksInit(NSString *bundlePath, NSString *containerPath, NSURL *store, NSString *legacyAlias) {
+    if (!bundlePath.isAbsolutePath || !containerPath.isAbsolutePath || !store.isFileURL || !store.path.isAbsolutePath) {
         LCKeychainLogMessage(@"init", @"none", errSecParam, @"invalid-guest-path");
         return NO;
     }
     managedKeychainBundleRoot = [bundlePath.stringByResolvingSymlinksInPath stringByAppendingString:@"/"];
-    managedKeychainDirectory = [NSURL fileURLWithPath:[containerPath stringByAppendingPathComponent:@"Library/LCManagedKeychain"] isDirectory:YES];
+    managedKeychainDirectory = store;
+    managedKeychainMigration = [LCKeychainMigration new];
+    managedKeychainMigration.oldDirectory = [NSURL fileURLWithPath:[containerPath stringByAppendingPathComponent:@"Library/LCManagedKeychain"] isDirectory:YES];
     id legacyGroupID = [NSUserDefaults guestContainerInfo][@"keychainGroupId"];
     NSString *team = LCSharedUtils.teamIdentifier;
-    if ([legacyGroupID isKindOfClass:NSNumber.class] && [legacyGroupID integerValue] >= 0 && team.length) {
+    if (legacyAlias.length && [legacyGroupID isKindOfClass:NSNumber.class] && [legacyGroupID integerValue] >= 0 && team.length) {
         NSInteger group = [legacyGroupID integerValue];
         NSString *base = [team stringByAppendingString:@".com.kdt.livecontainer.shared"];
         managedLegacyGroup = group ? [base stringByAppendingFormat:@".%ld", (long)group] : base;
-        managedLegacyAlias = containerPath.lastPathComponent;
+        managedLegacyAlias = legacyAlias;
+        managedKeychainMigration.systemFind = ^OSStatus(NSDictionary *selector, BOOL includeData, NSArray<NSDictionary *> **records) {
+            return LCManagedSystemFind(selector, includeData, records);
+        };
+        managedKeychainMigration.systemRemove = ^OSStatus(NSString *itemClass, NSData *reference) {
+            return LCManagedSystemRemove(itemClass, reference);
+        };
     }
 
     // Only redirect imports from the guest bundle, not LC or OS frameworks.

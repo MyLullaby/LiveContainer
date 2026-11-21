@@ -14,6 +14,9 @@ static NSString *const LCKeychainRecordRef = @"lc-ref";
 static const NSUInteger LCKeychainMaxBytes = 8 * 1024 * 1024;
 static char LCKeychainOwnedSoftwareKeyMarker;
 
+@implementation LCKeychainMigration
+@end
+
 static NSArray *LCKeychainKeyUsageAttributes(void) {
     static NSArray *attributes;
     static dispatch_once_t once;
@@ -666,8 +669,8 @@ static NSData *LCKeychainReadStore(NSURL *file, OSStatus *status, NSString **rea
     return nil;
 }
 
-static OSStatus LCKeychainWriteStore(NSURL *store, NSArray *items, NSArray *blocked, BOOL replace,
-                                     NSString **reason) {
+static OSStatus LCKeychainWriteStore(NSURL *store, NSArray *items, NSArray *blocked, NSDictionary *migrationState,
+                                     BOOL replace, NSString **reason) {
     NSMutableArray *unlocked = [NSMutableArray array], *afterFirstUnlock = [NSMutableArray array];
     for (NSDictionary *item in items) {
         NSDictionary *record = item;
@@ -678,7 +681,8 @@ static OSStatus LCKeychainWriteStore(NSURL *store, NSArray *items, NSArray *bloc
         }
         [(LCKeychainAfterFirstUnlock(item) ? afterFirstUnlock : unlocked) addObject:record];
     }
-    NSArray *documents = @[@{@"items": unlocked, @"legacy-blocked": blocked}, afterFirstUnlock];
+    NSArray *documents = @[@{@"items": unlocked, @"legacy-blocked": blocked,
+        @"migration": migrationState ?: @{}}, afterFirstUnlock];
     NSMutableArray<NSData *> *encoded = [NSMutableArray arrayWithCapacity:2];
     NSUInteger total = 0;
     for (id document in documents) {
@@ -703,7 +707,8 @@ static OSStatus LCKeychainWriteStore(NSURL *store, NSArray *items, NSArray *bloc
     NSDataWritingOptions unlockedOptions = 0, afterFirstUnlockOptions = 0;
 #if TARGET_OS_IPHONE
     afterFirstUnlockOptions = NSDataWritingFileProtectionCompleteUntilFirstUserAuthentication;
-    unlockedOptions = unlocked.count || blocked.count ? NSDataWritingFileProtectionComplete : afterFirstUnlockOptions;
+    unlockedOptions = unlocked.count || blocked.count || migrationState[@"removals"] ?
+        NSDataWritingFileProtectionComplete : afterFirstUnlockOptions;
 #endif
     BOOL committed = [encoded[0] writeToURL:[temporary URLByAppendingPathComponent:@"unlocked.plist"]
                                    options:unlockedOptions error:nil] &&
@@ -718,9 +723,292 @@ static OSStatus LCKeychainWriteStore(NSURL *store, NSArray *items, NSArray *bloc
     return errSecNotAvailable;
 }
 
+@interface LCKeychainSnapshot : NSObject
+@property(nonatomic, copy) NSArray *items;
+@property(nonatomic, copy) NSArray *blocked;
+@property(nonatomic, copy) NSDictionary *migration;
+@property(nonatomic) BOOL split;
+@property(nonatomic) BOOL v1;
+@property(nonatomic) BOOL partial;
+@end
+
+@implementation LCKeychainSnapshot
+@end
+
+static LCKeychainSnapshot *LCKeychainLoadStore(NSURL *directory, BOOL allowPartial, BOOL allowEmptyDirectory,
+                                               OSStatus *status, NSString **reason) {
+    NSURL *v1 = [directory URLByAppendingPathComponent:@"items-v1.plist"];
+    NSURL *store = [directory URLByAppendingPathComponent:@"items-v2" isDirectory:YES];
+    NSURL *unlocked = [store URLByAppendingPathComponent:@"unlocked.plist"];
+    struct stat info;
+    BOOL split = lstat(store.fileSystemRepresentation, &info) == 0;
+    if ((split && !S_ISDIR(info.st_mode)) || (!split && errno != ENOENT)) {
+        *status = errSecNotAvailable; *reason = @"store-directory"; return nil;
+    }
+    BOOL denied = NO;
+    NSData *data = LCKeychainReadStore(split ? unlocked : v1, status, reason, &denied);
+    BOOL partial = split && denied && allowPartial;
+    if (partial) *status = errSecSuccess;
+    if (*status != errSecSuccess) return nil;
+    if (split && !data && !partial) {
+        NSArray *entries = allowEmptyDirectory ?
+            [NSFileManager.defaultManager contentsOfDirectoryAtPath:store.path error:nil] : nil;
+        if (!entries || entries.count) {
+            *status = errSecDecode; *reason = @"store-missing-unlocked"; return nil;
+        }
+        // Only a proven empty old shell can fall back to the old v1 file.
+        split = NO;
+        data = LCKeychainReadStore(v1, status, reason, NULL);
+        if (*status != errSecSuccess) return nil;
+    }
+    id decoded = data ? [NSPropertyListSerialization propertyListWithData:data options:0 format:nil error:nil] : @[];
+    BOOL hasMetadata = [decoded isKindOfClass:NSDictionary.class];
+    NSArray *items = hasMetadata ? decoded[@"items"] : decoded;
+    NSArray *blocked = hasMetadata ? decoded[@"legacy-blocked"] : @[];
+    NSDictionary *migrationState = hasMetadata ? decoded[@"migration"] ?: @{} : @{};
+    if (LCKeychainValidateStore(items, nil, NULL) != errSecSuccess || ![blocked isKindOfClass:NSArray.class] ||
+        ![migrationState isKindOfClass:NSDictionary.class]) {
+        *status = errSecDecode; *reason = @"store-invalid-records"; return nil;
+    }
+    for (id entry in blocked) {
+        if (![entry isKindOfClass:NSDictionary.class]) { *status = errSecDecode; break; }
+        NSDictionary *filter = entry;
+        id filterClass = filter[KC(kSecClass)];
+        if (![filterClass isEqual:KC(kSecClassGenericPassword)] && ![filterClass isEqual:KC(kSecClassInternetPassword)]) {
+            *status = errSecDecode; break;
+        }
+        NSDictionary *filterTypes = LCKeychainAttributeTypes(filterClass);
+        for (NSString *key in filter) {
+            if (![key isEqual:KC(kSecClass)] && !LCKeychainValidAttribute(key, filter[key], filterTypes, YES)) {
+                *status = errSecDecode; break;
+            }
+        }
+        if (*status != errSecSuccess) break;
+    }
+    if (*status != errSecSuccess) { *reason = @"store-invalid-legacy-filters"; return nil; }
+    if (split) {
+        NSData *afterData = LCKeychainReadStore([store URLByAppendingPathComponent:@"after-first-unlock.plist"], status, reason, NULL);
+        if (*status != errSecSuccess) return nil;
+        id afterItems = afterData ? [NSPropertyListSerialization propertyListWithData:afterData options:0 format:nil error:nil] : nil;
+        if (![afterItems isKindOfClass:NSArray.class]) {
+            *status = errSecDecode; *reason = @"store-invalid-after-first-unlock"; return nil;
+        }
+        items = [items arrayByAddingObjectsFromArray:afterItems];
+        if (LCKeychainValidateStore(items, nil, NULL) != errSecSuccess) {
+            *status = errSecDecode; *reason = @"store-invalid-records"; return nil;
+        }
+    }
+    LCKeychainSnapshot *snapshot = [LCKeychainSnapshot new];
+    snapshot.items = items;
+    snapshot.blocked = blocked;
+    snapshot.migration = migrationState;
+    snapshot.split = split;
+    snapshot.v1 = !split && data != nil;
+    snapshot.partial = partial;
+    return snapshot;
+}
+
+static NSArray *LCKeychainAssignReferences(NSArray *items) {
+    NSMutableArray *referenced = [NSMutableArray arrayWithCapacity:items.count];
+    // Readback is partitioned in this order, regardless of the input order.
+    for (NSUInteger bucket = 0; bucket < 2; bucket++) {
+        for (NSDictionary *item in items) {
+            if (LCKeychainAfterFirstUnlock(item) != (BOOL)bucket) continue;
+            if (item[LCKeychainRecordRef]) [referenced addObject:item];
+            else {
+                NSMutableDictionary *record = item.mutableCopy;
+                record[LCKeychainRecordRef] = LCKeychainNewRef(record[KC(kSecClass)]);
+                [referenced addObject:record];
+            }
+        }
+    }
+    return referenced;
+}
+
+static OSStatus LCKeychainSaveVerified(NSURL *directory, NSURL *store, NSArray *items, NSArray *blocked,
+                                       NSDictionary *state, BOOL replace, NSString **reason) {
+    OSStatus status = LCKeychainWriteStore(store, items, blocked, state, replace, reason);
+    if (status != errSecSuccess) return status;
+    LCKeychainSnapshot *saved = LCKeychainLoadStore(directory, NO, NO, &status, reason);
+    if (!saved) return status;
+    if (![saved.items isEqual:items] || ![saved.blocked isEqual:blocked] || ![saved.migration isEqual:state]) {
+        *reason = @"migration-readback-mismatch";
+        return errSecDecode;
+    }
+    return errSecSuccess;
+}
+
+static OSStatus LCKeychainRetireOldStore(NSURL *directory, NSURL *store, LCKeychainSnapshot *snapshot,
+                                         NSURL *source, NSString **reason) {
+    struct stat info;
+    NSURL *parent = source.URLByDeletingLastPathComponent;
+    BOOL hasParent = lstat(parent.fileSystemRepresentation, &info) == 0;
+    if ((hasParent && !S_ISDIR(info.st_mode)) || (!hasParent && errno != ENOENT)) {
+        *reason = @"old-store-parent"; return errSecNotAvailable;
+    }
+    int oldLock = -1;
+    if (lstat(source.fileSystemRepresentation, &info) == 0) {
+        if (S_ISDIR(info.st_mode)) oldLock = open([source URLByAppendingPathComponent:@"items.lock"].fileSystemRepresentation,
+            O_CREAT | O_RDWR | O_EXLOCK | O_CLOEXEC | O_NOFOLLOW, 0600);
+        if (oldLock < 0) { *reason = @"old-store-lock"; return errSecNotAvailable; }
+    } else if (errno != ENOENT) {
+        *reason = @"old-store-directory"; return errSecNotAvailable;
+    }
+    OSStatus status = errSecSuccess;
+    do {
+        NSMutableArray *items = snapshot.items.mutableCopy;
+        NSMutableOrderedSet *blocked = [NSMutableOrderedSet orderedSetWithArray:snapshot.blocked];
+        LCKeychainSnapshot *old = oldLock >= 0 ? LCKeychainLoadStore(source, NO, YES, &status, reason) : nil;
+        if (oldLock >= 0 && !old) break;
+        if (old.split) {
+            NSURL *oldV2 = [source URLByAppendingPathComponent:@"items-v2" isDirectory:YES];
+            NSArray *entries = [NSFileManager.defaultManager contentsOfDirectoryAtPath:oldV2.path error:nil];
+            NSSet *expected = [NSSet setWithArray:@[@"unlocked.plist", @"after-first-unlock.plist"]];
+            if (!entries || ![[NSSet setWithArray:entries] isEqual:expected]) {
+                status = errSecDecode; *reason = @"old-store-unexpected-files"; break;
+            }
+        }
+        NSMutableDictionary *byIdentity = [NSMutableDictionary dictionary];
+        for (NSDictionary *item in items) byIdentity[LCKeychainIdentity(item)] = item;
+        for (NSDictionary *item in old.items) {
+            NSArray *identity = LCKeychainIdentity(item);
+            NSDictionary *current = byIdentity[identity];
+            if (current) {
+                // Do not silently discard either copy if the two stores diverged.
+                NSMutableDictionary *legacy = item.mutableCopy;
+                if (!legacy[LCKeychainRecordRef]) legacy[LCKeychainRecordRef] = current[LCKeychainRecordRef];
+                if (![current isEqual:legacy]) { status = errSecDuplicateItem; *reason = @"old-store-record-conflict"; break; }
+            } else {
+                [items addObject:item];
+            }
+        }
+        if (status != errSecSuccess) break;
+        if (old.blocked.count) [blocked addObjectsFromArray:old.blocked];
+        NSArray *verifiedItems = LCKeychainAssignReferences(items);
+        if (oldLock >= 0) {
+            status = LCKeychainSaveVerified(directory, store, verifiedItems, blocked.array, snapshot.migration, snapshot.split, reason);
+            if (status != errSecSuccess) break;
+            NSURL *v1 = [source URLByAppendingPathComponent:@"items-v1.plist"];
+            NSURL *v2 = [source URLByAppendingPathComponent:@"items-v2" isDirectory:YES];
+            NSURL *retired = [source URLByAppendingPathComponent:@"items-v2.retired" isDirectory:YES];
+            NSFileManager *fm = NSFileManager.defaultManager;
+            // Remove the stale v1 first, never leaving it visible after retiring authoritative v2.
+            if ((unlink(v1.fileSystemRepresentation) != 0 && errno != ENOENT) ||
+                (renameatx_np(AT_FDCWD, v2.fileSystemRepresentation, AT_FDCWD, retired.fileSystemRepresentation,
+                    RENAME_EXCL) != 0 && errno != ENOENT)) {
+                status = errSecNotAvailable; *reason = @"old-store-retire"; break;
+            }
+            NSError *error = nil;
+            if (![fm removeItemAtURL:retired error:&error] &&
+                !([error.domain isEqual:NSCocoaErrorDomain] && error.code == NSFileNoSuchFileError)) {
+                status = errSecNotAvailable; *reason = @"old-store-cleanup"; break;
+            }
+        }
+        NSMutableDictionary *state = snapshot.migration.mutableCopy;
+        state[@"old-done"] = @YES;
+        status = LCKeychainSaveVerified(directory, store, verifiedItems, blocked.array, state, oldLock >= 0 || snapshot.split, reason);
+    } while (0);
+    if (oldLock >= 0) close(oldLock);
+    return status;
+}
+
+static NSDictionary *LCKeychainImportRecord(NSDictionary *native, NSString *itemClass) {
+    NSDictionary *types = LCKeychainAttributeTypes(itemClass);
+    NSMutableDictionary *candidate = [NSMutableDictionary dictionary];
+    for (NSString *key in types) {
+        id value = native[key];
+        if (!value) continue;
+        if (([key isEqual:KC(kSecAttrIsInvisible)] || [key isEqual:KC(kSecAttrIsNegative)]) &&
+            [value isKindOfClass:NSNumber.class] && ([value isEqual:@0] || [value isEqual:@1])) value = @([value boolValue]);
+        candidate[key] = value;
+    }
+    candidate[KC(kSecClass)] = itemClass;
+    candidate[KC(kSecValueData)] = native[KC(kSecValueData)];
+    candidate[KC(kSecAttrCreationDate)] = native[KC(kSecAttrCreationDate)] ?: NSDate.date;
+    candidate[KC(kSecAttrModificationDate)] = native[KC(kSecAttrModificationDate)] ?: candidate[KC(kSecAttrCreationDate)];
+    return LCKeychainValidateStore(@[candidate], nil, NULL) == errSecSuccess ? candidate : nil;
+}
+
+static NSDictionary *LCKeychainSystemIdentitySelector(NSDictionary *item) {
+    NSString *itemClass = item[KC(kSecClass)];
+    if ([item[KC(kSecAttrAccount)] isKindOfClass:NSData.class]) return nil;
+    NSArray *keys = nil;
+    if ([itemClass isEqual:KC(kSecClassGenericPassword)]) keys = @[KC(kSecAttrAccount), KC(kSecAttrService)];
+    else if ([itemClass isEqual:KC(kSecClassInternetPassword)]) keys = @[
+        KC(kSecAttrAccount), KC(kSecAttrServer), KC(kSecAttrSecurityDomain), KC(kSecAttrProtocol),
+        KC(kSecAttrAuthenticationType), KC(kSecAttrPort), KC(kSecAttrPath)];
+    else if ([itemClass isEqual:KC(kSecClassKey)]) keys = @[
+        KC(kSecAttrKeyClass), KC(kSecAttrKeyType), KC(kSecAttrApplicationLabel), KC(kSecAttrApplicationTag)];
+    else if ([itemClass isEqual:KC(kSecClassCertificate)]) keys = @[KC(kSecAttrIssuer), KC(kSecAttrSerialNumber)];
+    else return nil;
+    NSMutableDictionary *selector = [@{KC(kSecClass): itemClass} mutableCopy];
+    for (NSString *key in keys) if (item[key]) selector[key] = item[key];
+    return selector;
+}
+
+static NSDictionary *LCKeychainSystemRemoval(NSString *itemClass, NSDictionary *record, BOOL imported) {
+    NSData *reference = record[KC(kSecValuePersistentRef)];
+    if (!reference.length) return nil;
+    NSMutableDictionary *job = [@{KC(kSecClass): itemClass, KC(kSecValuePersistentRef): reference} mutableCopy];
+    if (imported) {
+        NSDate *modified = record[KC(kSecAttrModificationDate)];
+        if (modified) job[KC(kSecAttrModificationDate)] = modified;
+    }
+    return job;
+}
+
+static BOOL LCKeychainValidRemovals(id removals) {
+    if (!removals) return YES;
+    if (![removals isKindOfClass:NSArray.class]) return NO;
+    for (id entry in removals) {
+        if (![entry isKindOfClass:NSDictionary.class]) return NO;
+        id itemClass = entry[KC(kSecClass)], reference = entry[KC(kSecValuePersistentRef)], date = entry[KC(kSecAttrModificationDate)];
+        if (![itemClass isKindOfClass:NSString.class] || !LCKeychainAttributeTypes(itemClass) ||
+            ![reference isKindOfClass:NSData.class] || ![reference length] ||
+            (date && ![date isKindOfClass:NSDate.class])) return NO;
+    }
+    return YES;
+}
+
+static OSStatus LCKeychainDrainSystemRemovals(LCKeychainMigration *migration, NSMutableArray *jobs) {
+    OSStatus firstError = errSecSuccess;
+    for (NSDictionary *job in jobs.copy) {
+        NSString *itemClass = job[KC(kSecClass)];
+        NSData *reference = job[KC(kSecValuePersistentRef)];
+        NSDate *expected = job[KC(kSecAttrModificationDate)];
+        OSStatus status = errSecSuccess;
+        if (expected) {
+            NSArray *current = nil;
+            status = migration.systemFind(@{KC(kSecClass): itemClass, KC(kSecValuePersistentRef): reference}, NO, &current);
+            if (status == errSecSuccess && ![current.firstObject[KC(kSecAttrModificationDate)] isEqual:expected]) {
+                status = errSecNotAvailable;
+            }
+        }
+        if (status == errSecSuccess) status = migration.systemRemove(itemClass, reference);
+        if (status == errSecSuccess || status == errSecItemNotFound) [jobs removeObject:job];
+        else {
+            LCKeychainLogMessage(@"migration-delete", itemClass, status, @"system-removal-pending");
+            if (firstError == errSecSuccess) firstError = status;
+        }
+    }
+    return firstError;
+}
+
+static BOOL LCKeychainSystemIsEmpty(LCKeychainMigration *migration) {
+    for (NSString *itemClass in @[KC(kSecClassGenericPassword), KC(kSecClassInternetPassword),
+        KC(kSecClassKey), KC(kSecClassCertificate)]) {
+        NSArray *records = nil;
+        OSStatus status = migration.systemFind(@{KC(kSecClass): itemClass}, NO, &records);
+        if (status == errSecItemNotFound || (status == errSecSuccess && !records.count)) continue;
+        if (status != errSecSuccess) LCKeychainLogMessage(@"migration-check", itemClass, status, @"system-inventory-unavailable");
+        return NO;
+    }
+    return YES;
+}
+
 static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operation, CFDictionaryRef input,
                                   CFDictionaryRef updates, CFTypeRef *result, NSDictionary *additionalKey,
-                                  LCKeychainLegacyRead legacyRead) {
+                                  LCKeychainLegacyRead legacyRead, LCKeychainMigration *migration) {
     if (result) *result = NULL;
     NSString *op = @[@"add", @"copy", @"update", @"delete"][operation];
     NSDictionary *options = (__bridge NSDictionary *)input;
@@ -1045,65 +1333,51 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
     id output = nil;
     NSDictionary *defaults = (keyItem || certificateItem) ? @{KC(kSecAttrSynchronizable): @NO} : LCKeychainPasswordDefaults(itemClass);
     NSDictionary *imported = nil;
-    do {
+    BOOL retriedOld = NO;
+    BOOL retriedSystemRemovals = NO;
+    for (;;) {
         NSURL *legacyFile = [directory URLByAppendingPathComponent:@"items-v1.plist"];
         NSURL *store = [directory URLByAppendingPathComponent:@"items-v2" isDirectory:YES];
         NSURL *unlockedFile = [store URLByAppendingPathComponent:@"unlocked.plist"];
         NSURL *afterFirstUnlockFile = [store URLByAppendingPathComponent:@"after-first-unlock.plist"];
-        struct stat storeInfo;
-        BOOL splitStore = lstat(store.fileSystemRepresentation, &storeInfo) == 0;
-        if ((splitStore && !S_ISDIR(storeInfo.st_mode)) || (!splitStore && errno != ENOENT)) {
-            status = errSecNotAvailable; reason = @"store-directory"; break;
+        LCKeychainSnapshot *snapshot = LCKeychainLoadStore(directory, operation == LCKeychainCopy, NO, &status, &reason);
+        if (!snapshot) break;
+        BOOL partialRead = snapshot.partial;
+        BOOL splitStore = snapshot.split;
+        BOOL migrate = snapshot.v1;
+        NSMutableDictionary *migrationState = snapshot.migration.mutableCopy;
+        if (!LCKeychainValidRemovals(migrationState[@"removals"])) {
+            status = errSecDecode; reason = @"invalid-system-removal-journal"; break;
         }
-        BOOL unlockedDenied = NO;
-        NSData *data = LCKeychainReadStore(splitStore ? unlockedFile : legacyFile, &status, &reason, &unlockedDenied);
-        BOOL partialRead = splitStore && unlockedDenied && operation == LCKeychainCopy;
-        if (partialRead) status = errSecSuccess;
-        if (status != errSecSuccess) break;
-        if (splitStore && !data && !partialRead) {
-            status = errSecDecode; reason = @"store-missing-unlocked"; break;
-        }
-        id decoded = data ? [NSPropertyListSerialization propertyListWithData:data options:0 format:nil error:nil] : @[];
-        BOOL hasMetadata = [decoded isKindOfClass:NSDictionary.class];
-        NSArray *existing = hasMetadata ? decoded[@"items"] : decoded;
-        NSArray *blocked = hasMetadata ? decoded[@"legacy-blocked"] : @[];
-        if (LCKeychainValidateStore(existing, nil, NULL) != errSecSuccess || ![blocked isKindOfClass:NSArray.class]) {
-            status = errSecDecode; reason = @"store-invalid-records"; break;
-        }
-        for (id entry in blocked) {
-            if (![entry isKindOfClass:NSDictionary.class]) { status = errSecDecode; break; }
-            NSDictionary *filter = entry;
-            id filterClass = filter[KC(kSecClass)];
-            if (![filterClass isEqual:KC(kSecClassGenericPassword)] && ![filterClass isEqual:KC(kSecClassInternetPassword)]) {
-                status = errSecDecode;
-                break;
+        NSMutableArray *removals = [migrationState[@"removals"] mutableCopy] ?: [NSMutableArray array];
+        BOOL systemActive = migration.systemFind && migration.systemRemove && ![migrationState[@"system-done"] isEqual:@YES];
+        BOOL oldActive = migration.oldDirectory && ![migrationState[@"old-done"] isEqual:@YES];
+        if (!partialRead && systemActive && removals.count && !retriedSystemRemovals) {
+            retriedSystemRemovals = YES;
+            NSUInteger before = removals.count;
+            LCKeychainDrainSystemRemovals(migration, removals);
+            if (before != removals.count) {
+                migrationState[@"removals"] = removals.count ? removals.copy : nil;
+                if (!removals.count && LCKeychainSystemIsEmpty(migration)) migrationState[@"system-done"] = @YES;
+                status = LCKeychainSaveVerified(directory, store, LCKeychainAssignReferences(snapshot.items), snapshot.blocked,
+                    migrationState, splitStore, &reason);
+                if (status != errSecSuccess) break;
+                continue;
             }
-            NSDictionary *filterTypes = LCKeychainAttributeTypes(filterClass);
-            for (NSString *key in filter) {
-                if (![key isEqual:KC(kSecClass)] && !LCKeychainValidAttribute(key, filter[key], filterTypes, YES)) {
-                    status = errSecDecode;
-                    break;
-                }
-            }
+        }
+        if (oldActive && operation != LCKeychainCopy && !retriedOld) {
+            status = LCKeychainRetireOldStore(directory, store, snapshot, migration.oldDirectory, &reason);
             if (status != errSecSuccess) break;
+            retriedOld = YES;
+            continue;
         }
-        if (status != errSecSuccess) { reason = @"store-invalid-legacy-filters"; break; }
-        if (splitStore) {
-            NSData *afterData = LCKeychainReadStore(afterFirstUnlockFile, &status, &reason, NULL);
-            if (status != errSecSuccess) break;
-            id afterItems = afterData ? [NSPropertyListSerialization propertyListWithData:afterData
-                options:0 format:nil error:nil] : nil;
-            if (![afterItems isKindOfClass:NSArray.class]) {
-                status = errSecDecode; reason = @"store-invalid-after-first-unlock"; break;
-            }
-            existing = [existing arrayByAddingObjectsFromArray:afterItems];
-            if (LCKeychainValidateStore(existing, nil, NULL) != errSecSuccess) {
-                status = errSecDecode; reason = @"store-invalid-records"; break;
-            }
-        }
+        NSArray *existing = snapshot.items;
+        NSArray *blocked = snapshot.blocked;
         NSMutableArray *items = existing.mutableCopy;
         NSMutableArray *legacyBlocked = blocked.mutableCopy;
-        BOOL migrate = !splitStore && data != nil;
+        BOOL migrationDirty = NO;
+        BOOL checkSystemEmpty = NO;
+        BOOL systemDeleteMatched = NO;
         BOOL dirty = NO;
         NSIndexSet *updatedIndexes = nil;
         if (operation == LCKeychainAdd) {
@@ -1211,32 +1485,33 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
                 *stop = matches.count == (requireUniqueKey ? 2 : matchLimit);
             }];
             if (requireUniqueKey && matches.count > 1) { status = errSecParam; reason = @"ambiguous-key-reference"; break; }
-            if (!partialRead && !matches.count && legacyRead && localPasswordRead && allowLegacyRead &&
+            if (!partialRead && !matches.count && oldActive && !retriedOld) {
+                status = LCKeychainRetireOldStore(directory, store, snapshot, migration.oldDirectory, &reason);
+                if (status != errSecSuccess) break;
+                retriedOld = YES;
+                continue;
+            }
+            if (!partialRead && !matches.count && (legacyRead || systemActive) && localPasswordRead && allowLegacyRead &&
                 matchLimit == 1 && !hasPersistentSelector && !requestsSync && !attributes[KC(kSecAttrAccessGroup)] &&
                 attributes[KC(kSecAttrAccount)] && (attributes[KC(kSecAttrService)] || attributes[KC(kSecAttrServer)])) {
                 BOOL blockedQuery = NO;
                 for (NSDictionary *filter in blocked) {
                     if (LCKeychainMatches(attributes, nil, filter, @{})) { blockedQuery = YES; break; }
                 }
-                NSDictionary *legacy = blockedQuery ? nil : legacyRead(attributes);
+                NSDictionary *legacy = nil;
+                if (!blockedQuery && systemActive) {
+                    NSArray *systemRecords = nil;
+                    OSStatus findStatus = migration.systemFind(attributes, YES, &systemRecords);
+                    if (findStatus == errSecSuccess) legacy = systemRecords.firstObject;
+                    else if (findStatus != errSecItemNotFound) {
+                        LCKeychainLogMessage(@"legacy-read", className, findStatus, @"system-read-failed");
+                    }
+                    checkSystemEmpty = findStatus == errSecItemNotFound || (findStatus == errSecSuccess && !legacy);
+                } else if (!blockedQuery && legacyRead) legacy = legacyRead(attributes);
                 NSMutableDictionary *candidate = nil;
                 if (legacy) {
-                    candidate = [NSMutableDictionary dictionary];
-                    for (NSString *key in types) {
-                        id value = legacy[key];
-                        if (!value) continue;
-                        if (([key isEqual:KC(kSecAttrIsInvisible)] || [key isEqual:KC(kSecAttrIsNegative)]) &&
-                            [value isKindOfClass:NSNumber.class] && ([value isEqual:@0] || [value isEqual:@1])) {
-                            value = @([value boolValue]);
-                        }
-                        candidate[key] = value;
-                    }
-                    candidate[KC(kSecClass)] = itemClass;
-                    candidate[KC(kSecValueData)] = legacy[KC(kSecValueData)];
-                    candidate[KC(kSecAttrCreationDate)] = legacy[KC(kSecAttrCreationDate)] ?: NSDate.date;
-                    candidate[KC(kSecAttrModificationDate)] = legacy[KC(kSecAttrModificationDate)] ?: candidate[KC(kSecAttrCreationDate)];
-                    if (LCKeychainValidateStore(@[candidate], nil, NULL) != errSecSuccess ||
-                        !LCKeychainMatches(candidate, nil, attributes, defaults)) {
+                    candidate = LCKeychainImportRecord(legacy, itemClass).mutableCopy;
+                    if (!candidate || !LCKeychainMatches(candidate, nil, attributes, defaults)) {
                         LCKeychainLogMessage(@"legacy-import", className, errSecDecode, @"legacy-record-incompatible");
                         candidate = nil;
                     }
@@ -1252,6 +1527,20 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
                     for (NSDictionary *item in existing) {
                         if (identity && [LCKeychainIdentity(item) isEqual:identity]) { candidate = nil; break; }
                     }
+                    if (candidate && systemActive) {
+                        NSDictionary *job = LCKeychainSystemRemoval(itemClass, legacy, YES);
+                        if (!job) { status = errSecDecode; reason = @"system-record-without-reference"; break; }
+                        for (NSDictionary *pending in removals) {
+                            if ([pending[KC(kSecValuePersistentRef)] isEqual:job[KC(kSecValuePersistentRef)]]) {
+                                candidate = nil;
+                                break;
+                            }
+                        }
+                        if (candidate) {
+                            [removals addObject:job];
+                            migrationDirty = YES;
+                        }
+                    }
                     if (candidate) {
                         candidate[LCKeychainRecordRef] = LCKeychainNewRef(itemClass);
                         [matches addIndex:items.count];
@@ -1261,7 +1550,55 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
                     }
                 }
             }
-            if (passwordItem && !requestsSync && !attributes[KC(kSecAttrAccessGroup)] &&
+            if (operation == LCKeychainDelete && systemActive && !requestsSync && !attributes[KC(kSecAttrAccessGroup)]) {
+                NSMutableDictionary<NSDictionary *, NSArray *> *selectors = [NSMutableDictionary dictionary];
+                NSMutableSet *matchedIdentities = [NSMutableSet set];
+                [matches enumerateIndexesUsingBlock:^(NSUInteger index, BOOL *stop) {
+                    NSDictionary *item = items[index];
+                    if (item[KC(kSecAttrAccessGroup)]) return;
+                    NSDictionary *selector = LCKeychainSystemIdentitySelector(item);
+                    if (selector) {
+                        NSArray *identity = LCKeychainIdentity(item);
+                        selectors[selector] = identity;
+                        [matchedIdentities addObject:identity];
+                    }
+                }];
+                BOOL scanQuery = !hasPersistentSelector && !localMetadataSelector && !valueReference && allowLegacyRead &&
+                    matchLimit > matches.count;
+                if (scanQuery) selectors[attributes.copy] = @[];
+                NSMutableDictionary<NSData *, NSDictionary *> *newJobs = [NSMutableDictionary dictionary];
+                NSMutableSet *additional = [NSMutableSet set];
+                for (NSDictionary *selector in selectors) {
+                    NSArray *expectedIdentity = selectors[selector];
+                    NSArray *nativeItems = nil;
+                    status = migration.systemFind(selector, NO, &nativeItems);
+                    if (status == errSecItemNotFound) { status = errSecSuccess; continue; }
+                    if (status != errSecSuccess) { reason = @"system-delete-lookup"; break; }
+                    for (NSDictionary *native in nativeItems) {
+                        NSArray *identity = LCKeychainIdentity(native);
+                        if (expectedIdentity.count && ![identity isEqual:expectedIdentity]) continue;
+                        if (!expectedIdentity.count && ![matchedIdentities containsObject:identity] &&
+                            ![additional containsObject:identity]) {
+                            if (additional.count >= matchLimit - matches.count) continue;
+                            [additional addObject:identity];
+                        }
+                        NSDictionary *job = LCKeychainSystemRemoval(selector[KC(kSecClass)], native, NO);
+                        if (!job) { status = errSecDecode; reason = @"system-record-without-reference"; break; }
+                        newJobs[job[KC(kSecValuePersistentRef)]] = job;
+                    }
+                    if (status != errSecSuccess) break;
+                }
+                if (status != errSecSuccess) break;
+                if (newJobs.count) {
+                    NSIndexSet *replaced = [removals indexesOfObjectsPassingTest:^BOOL(NSDictionary *job, NSUInteger idx, BOOL *stop) {
+                        return newJobs[job[KC(kSecValuePersistentRef)]] != nil;
+                    }];
+                    [removals removeObjectsAtIndexes:replaced];
+                    [removals addObjectsFromArray:newJobs.allValues];
+                    dirty = migrationDirty = systemDeleteMatched = YES;
+                } else if (selectors.count) checkSystemEmpty = YES;
+            }
+            if ((!migration || systemActive) && passwordItem && !requestsSync && !attributes[KC(kSecAttrAccessGroup)] &&
                 (operation == LCKeychainDelete || (operation == LCKeychainUpdate && matches.count))) {
                 if (operation == LCKeychainDelete && matchLimit == NSUIntegerMax && !localMetadataSelector &&
                     !hasPersistentSelector && ![legacyBlocked containsObject:attributes]) {
@@ -1279,7 +1616,11 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
                     if (![legacyBlocked containsObject:filter]) [legacyBlocked addObject:filter];
                 }];
             }
-            if (!matches.count) {
+            if (checkSystemEmpty && !removals.count && LCKeychainSystemIsEmpty(migration)) {
+                migrationState[@"system-done"] = @YES;
+                dirty = migrationDirty = YES;
+            }
+            if (!matches.count && !systemDeleteMatched) {
                 if (partialRead) {
                     status = errSecInteractionNotAllowed; reason = @"store-locked"; break;
                 }
@@ -1352,7 +1693,10 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
             }
             break;
         }
-        OSStatus writeStatus = LCKeychainWriteStore(store, items, legacyBlocked, splitStore, &reason);
+        if (migrationDirty) migrationState[@"removals"] = removals.count ? removals.copy : nil;
+        OSStatus writeStatus = migrationDirty ? LCKeychainSaveVerified(directory, store, LCKeychainAssignReferences(items),
+            legacyBlocked, migrationState, splitStore, &reason) :
+            LCKeychainWriteStore(store, items, legacyBlocked, migrationState, splitStore, &reason);
         if (writeStatus != errSecSuccess) {
             if (migrate && !dirty && operation == LCKeychainCopy) {
                 LCKeychainLogMessage(op, className, writeStatus, reason);
@@ -1378,7 +1722,22 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
                 status = errSecDecode; reason = @"legacy-import-mismatch"; break;
             }
         }
-    } while (0);
+        if (migrationDirty && removals.count && systemActive) {
+            NSUInteger before = removals.count;
+            OSStatus removeStatus = LCKeychainDrainSystemRemovals(migration, removals);
+            if (before != removals.count) {
+                migrationState[@"removals"] = removals.count ? removals.copy : nil;
+                if (!removals.count && LCKeychainSystemIsEmpty(migration)) migrationState[@"system-done"] = @YES;
+                OSStatus saveStatus = LCKeychainSaveVerified(directory, store, LCKeychainAssignReferences(items),
+                    legacyBlocked, migrationState, YES, &reason);
+                if (saveStatus != errSecSuccess) { status = saveStatus; break; }
+            }
+            if (operation == LCKeychainDelete && removeStatus != errSecSuccess) {
+                status = removeStatus; reason = @"system-removal-pending";
+            }
+        }
+        break;
+    }
     close(lock);
     if (status != errSecSuccess) return fail(status, reason);
     if (imported) LCKeychainLogMessage(@"legacy-import", className, errSecSuccess, @"legacy-import-verified");
@@ -1388,12 +1747,17 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
 
 OSStatus LCManagedKeychainPerform(NSURL *directory, LCKeychainOperation operation,
                                   CFDictionaryRef input, CFDictionaryRef updates, CFTypeRef *result) {
-    return LCKeychainPerform(directory, operation, input, updates, result, nil, nil);
+    return LCKeychainPerform(directory, operation, input, updates, result, nil, nil, nil);
 }
 
 OSStatus LCManagedKeychainPerformWithLegacyRead(NSURL *directory, LCKeychainOperation operation,
     CFDictionaryRef input, CFDictionaryRef updates, CFTypeRef *result, LCKeychainLegacyRead legacyRead) {
-    return LCKeychainPerform(directory, operation, input, updates, result, nil, legacyRead);
+    return LCKeychainPerform(directory, operation, input, updates, result, nil, legacyRead, nil);
+}
+
+OSStatus LCManagedKeychainPerformMigrating(NSURL *directory, LCKeychainMigration *migration,
+    LCKeychainOperation operation, CFDictionaryRef input, CFDictionaryRef updates, CFTypeRef *result) {
+    return LCKeychainPerform(directory, operation, input, updates, result, nil, nil, migration);
 }
 
 static NSDictionary *LCKeychainGenerationRecord(NSDictionary *common, NSDictionary *specific, SecKeyRef key) {
@@ -1498,7 +1862,7 @@ static SecKeyRef LCManagedGenerateSoftwareKey(NSURL *directory, NSString *operat
             if (status != errSecSuccess) reason = LCKeychainFailureReason(reason, softwareToken);
         }
         if (status == errSecSuccess) {
-            status = LCKeychainPerform(directory, LCKeychainAdd, (__bridge CFDictionaryRef)(privateRecord ?: publicRecord), NULL, NULL, second, nil);
+            status = LCKeychainPerform(directory, LCKeychainAdd, (__bridge CFDictionaryRef)(privateRecord ?: publicRecord), NULL, NULL, second, nil, nil);
             if (status != errSecSuccess) reason = softwareToken ? @"token-persistent-key-store-failed" : @"persistent-key-store-failed";
         }
     }

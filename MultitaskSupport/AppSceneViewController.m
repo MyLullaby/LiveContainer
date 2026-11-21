@@ -72,12 +72,24 @@
     }
     
     NSURL *docURL = [NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].lastObject;
+    bool isSharedApp = false;
+    NSBundle *bundle = [LCSharedUtils findBundleWithBundleId:bundleId isSharedAppOut:&isSharedApp];
+    NSDictionary *appInfo = [NSDictionary dictionaryWithContentsOfURL:[bundle.bundleURL URLByAppendingPathComponent:@"LCAppInfo.plist"]];
+    if (!isSharedApp && [appInfo[@"useLCKeychain"] boolValue]) {
+        NSURL *store = [LCSharedUtils managedKeychainURLForApp:bundleId container:dataUUID owner:NSHomeDirectory()];
+        NSData *bookmark = [NSFileManager.defaultManager createDirectoryAtURL:store withIntermediateDirectories:YES attributes:nil error:&error] ?
+            [store bookmarkDataWithOptions:(1<<11) includingResourceValuesForKeys:nil relativeToURL:nil error:&error] : nil;
+        if (!bookmark) {
+            [delegate appSceneVC:self didInitializeWithError:error ?: [NSError errorWithDomain:@"LiveProcess" code:3
+                userInfo:@{NSLocalizedDescriptionKey: @"Unable to share the managed keychain directory"}]];
+            return nil;
+        }
+        [bookmarks addObject:bookmark];
+    }
     if ([NSUserDefaults.standardUserDefaults boolForKey:@"LCSharePrivateDataWithLiveProcess"]) {
         NSData* bookmarkData = [docURL bookmarkDataWithOptions:(1<<11) includingResourceValuesForKeys:0 relativeToURL:0 error:0];
         [bookmarks addObject:bookmarkData];
     } else {
-        bool isSharedApp = false;
-        NSBundle* bundle = [LCSharedUtils findBundleWithBundleId:bundleId isSharedAppOut:&isSharedApp];
         // when mutlitask with private app, we can restrict its sandbox to only its own container
         if (!isSharedApp) {
             NSURL *dataURL = [docURL URLByAppendingPathComponent:[NSString stringWithFormat:@"Data/Application/%@", dataUUID]];

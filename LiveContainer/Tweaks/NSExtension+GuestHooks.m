@@ -223,6 +223,15 @@ static void LCConnectGuestContext(LCGuestExtensionContextState *state, Class con
         if (![fm createDirectoryAtURL:[containerURL URLByAppendingPathComponent:directory] withIntermediateDirectories:YES attributes:nil error:&error]) break;
     }
     NSMutableArray *bookmarks = [NSMutableArray array];
+    NSURL *managedKeychain = nil;
+    if (!error && [NSUserDefaults.guestAppInfo[@"useLCKeychain"] boolValue]) {
+        managedKeychain = [[LCManagedKeychainActiveDirectory() URLByAppendingPathComponent:@"extensions" isDirectory:YES]
+            URLByAppendingPathComponent:component isDirectory:YES];
+        if (!managedKeychain || ![fm createDirectoryAtURL:managedKeychain withIntermediateDirectories:YES attributes:nil error:&error]) {
+            if (errorOut) *errorOut = error ?: LCGuestExtensionError(@"Unable to open the managed keychain directory");
+            return nil;
+        }
+    }
     NSString *appGroupPath;
     if ([NSUserDefaults.guestContainerInfo[@"isolateAppGroup"] boolValue]) {
         appGroupPath = [guestExtensionsContainerURL.path stringByAppendingPathComponent:@"LCAppGroup"];
@@ -233,13 +242,15 @@ static void LCConnectGuestContext(LCGuestExtensionContextState *state, Class con
     }
     if (!error) [fm createDirectoryAtPath:appGroupPath withIntermediateDirectories:YES attributes:nil error:&error];
     if (!error) {
-        for (NSURL *url in @[guestExtensionsAppURL, containerURL, [NSURL fileURLWithPath:appGroupPath isDirectory:YES]]) {
+        NSMutableArray *urls = [@[guestExtensionsAppURL, containerURL, [NSURL fileURLWithPath:appGroupPath isDirectory:YES]] mutableCopy];
+        if (managedKeychain) [urls addObject:managedKeychain];
+        for (NSURL *url in urls) {
             NSData *bookmark = [url bookmarkDataWithOptions:(1 << 11) includingResourceValuesForKeys:nil relativeToURL:nil error:&error];
             if (!bookmark) break;
             [bookmarks addObject:bookmark];
         }
     }
-    if (error || bookmarks.count != 3) {
+    if (error || bookmarks.count != (managedKeychain ? 4 : 3)) {
         if (errorOut) *errorOut = error ?: LCGuestExtensionError(@"Unable to share the extension container");
         return nil;
     }
@@ -271,6 +282,7 @@ static void LCConnectGuestContext(LCGuestExtensionContextState *state, Class con
             @"appGroupPath": NSUserDefaults.lcAppGroupPath ?: @"",
             @"parentContainerPath": guestExtensionsContainerURL.path,
             @"lcHomePath": @(getenv("LC_HOME_PATH")),
+            @"managedKeychainPath": managedKeychain.path ?: @"",
         }
     };
     if (endpoint) {

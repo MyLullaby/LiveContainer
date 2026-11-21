@@ -12,6 +12,19 @@ typedef NSMutableDictionary *(^LCKeychainLegacyRead)(NSDictionary *attributes);
 OSStatus LCManagedKeychainPerformWithLegacyRead(NSURL *directory, LCKeychainOperation operation,
     CFDictionaryRef input, CFDictionaryRef updates, CFTypeRef *result, LCKeychainLegacyRead legacyRead);
 
+// The system adapter returns only records whose ownership it has verified.
+typedef OSStatus (^LCKeychainSystemFind)(NSDictionary *selector, BOOL includeData, NSArray<NSDictionary *> **records);
+typedef OSStatus (^LCKeychainSystemRemove)(NSString *itemClass, NSData *reference);
+
+@interface LCKeychainMigration : NSObject
+@property(nonatomic, copy) NSURL *oldDirectory;
+@property(nonatomic, copy) LCKeychainSystemFind systemFind;
+@property(nonatomic, copy) LCKeychainSystemRemove systemRemove;
+@end
+
+OSStatus LCManagedKeychainPerformMigrating(NSURL *directory, LCKeychainMigration *migration,
+    LCKeychainOperation operation, CFDictionaryRef input, CFDictionaryRef updates, CFTypeRef *result);
+
 SecKeyRef LCManagedCreateRandomKey(NSURL *directory, CFDictionaryRef parameters, CFErrorRef *error) CF_RETURNS_RETAINED;
 SecKeyRef LCManagedCreateKeyWithData(CFDataRef data, CFDictionaryRef parameters, CFErrorRef *error) CF_RETURNS_RETAINED;
 OSStatus LCManagedGenerateKeyPair(NSURL *directory, CFDictionaryRef parameters, SecKeyRef *publicKey, SecKeyRef *privateKey);

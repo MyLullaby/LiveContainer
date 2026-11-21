@@ -293,7 +293,10 @@ NSString *LCPrepareGuestExtension(NSDictionary *request) {
     *_CFGetProcessPath() = executablePath;
     overwriteExecPath(executablePath);
     NUDGuestHooksInit();
-    if ([guestAppInfo[@"useLCKeychain"] boolValue] && !LCManagedKeychainHooksInit(appPath, homePath)) {
+    NSString *keychainPath = request[@"managedKeychainPath"];
+    NSURL *keychainURL = keychainPath.isAbsolutePath ? [NSURL fileURLWithPath:keychainPath isDirectory:YES] : nil;
+    // Guest extensions did not get the app's legacy keychain alias.
+    if ([guestAppInfo[@"useLCKeychain"] boolValue] && !LCManagedKeychainHooksInit(appPath, homePath, keychainURL, nil)) {
         return @"Unable to install LC keychain hooks for the guest extension.";
     }
     NSFMGuestExtensionHooksInit(request[@"parentContainerPath"]);
@@ -593,7 +596,12 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     }
     if(!isSideStore) {
         if ([guestAppInfo[@"useLCKeychain"] boolValue]) {
-            if (!LCManagedKeychainHooksInit(bundlePath, newHomePath)) return @"Unable to install LC keychain hooks.";
+            NSString *owner = isSharedBundle ? appGroupFolder.path : [docPath stringByDeletingLastPathComponent];
+            NSURL *store = [LCSharedUtils managedKeychainURLForApp:selectedApp container:dataUUID owner:owner];
+            NSString *alias = newHomePath.lastPathComponent;
+            // Two external bookmarks can have the same folder name and legacy access group.
+            if (bookmarkURL && ![[NSUUID alloc] initWithUUIDString:alias]) alias = nil;
+            if (!LCManagedKeychainHooksInit(bundlePath, newHomePath, store, alias)) return @"Unable to install LC keychain hooks.";
         } else {
             SecItemGuestHooksInit();
         }
