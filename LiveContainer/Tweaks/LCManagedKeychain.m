@@ -1719,6 +1719,12 @@ static OSStatus LCKeychainParseKeyOptions(id input, BOOL import, NSDictionary **
             id value = level[field];
             BOOL valid = YES;
             if (!index && ([field isEqual:privateAttrs] || [field isEqual:publicAttrs])) continue;
+            if ([field isEqual:KC(kSecClass)]) {
+                // Key creation already fixes the item class, independently of the public/private key class.
+                if ([KC(kSecClassKey) isEqual:value]) continue;
+                *reason = LCKeychainKeyParameterReason(location, field, value, @"expected-key-item-class");
+                return errSecParam;
+            }
             if ([field isEqual:token]) {
                 valid = [value isKindOfClass:NSString.class] && [value length] > 0;
             } else if ([field isEqual:KC(kSecAttrAccessControl)]) {
