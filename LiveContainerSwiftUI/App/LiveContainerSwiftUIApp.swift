@@ -11,12 +11,22 @@ struct LiveContainerSwiftUIApp : SwiftUI.App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     init() {
-        let fm = FileManager()
-        var tempAppDataFolderNames : [String] = []
-        var tempTweakFolderNames : [String] = []
-        
         do {
             try DataManager.shared.model.reloadApps()
+        } catch {
+            NSLog("[LC] error:\(error)")
+        }
+        Task.detached {
+            await Self.initMiscellaneous()
+        }
+    }
+
+    nonisolated private static func initMiscellaneous() async {
+        let fm = FileManager()
+        var tempAppDataFolderNames: [String] = []
+        var tempTweakFolderNames: [String] = []
+
+        do {
             // load document folders
             try fm.createDirectory(at: LCPath.dataPath, withIntermediateDirectories: true)
             let dataDirs = try fm.contentsOfDirectory(atPath: LCPath.dataPath.path)
@@ -43,8 +53,10 @@ struct LiveContainerSwiftUIApp : SwiftUI.App {
             NSLog("[LC] error:\(error)")
         }
         
-        DataManager.shared.model.appDataFolderNames = tempAppDataFolderNames
-        DataManager.shared.model.tweakFolderNames = tempTweakFolderNames
+        await MainActor.run { [tempAppDataFolderNames, tempTweakFolderNames] in
+            DataManager.shared.model.appDataFolderNames = tempAppDataFolderNames
+            DataManager.shared.model.tweakFolderNames = tempTweakFolderNames
+        }
     }
     
     var body: some Scene {

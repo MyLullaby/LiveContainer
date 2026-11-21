@@ -9,3 +9,4 @@ Resources/Frameworks/OpenSSL.framework
 apps_nightly.json
 build
 .idea
+Dependencies/OpenSSL.xcframework

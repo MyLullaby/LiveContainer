@@ -41,7 +41,7 @@ bool sideStoreExist = false;
     return lcUserDefaults;
 }
 + (instancetype)lcSharedDefaults {
-    if(!lcUserDefaults) {
+    if(!lcSharedDefaults) {
         lcSharedDefaults = [[NSUserDefaults alloc] initWithSuiteName: [LCSharedUtils appGroupID]];
     }
     return lcSharedDefaults;
@@ -250,11 +250,10 @@ static void *getAppEntryPoint(void *handle) {
     return (void *)header + entryoff;
 }
 
-NSString *LCPrepareGuestExtension(NSDictionary *request) {
-    // Unlike an app launch, this process already has a live system extension
-    // context. Only prepare the guest environment and load its request handler.
+NSString *LCRunGuestExtension(NSDictionary *request, int argc, char *argv[], char *envp[], char *apple[]) {
     lcMainBundle = NSBundle.mainBundle;
     lcUserDefaults = NSUserDefaults.standardUserDefaults;
+    [LCSharedUtils certificatePassword];
     isLiveProcess = true;
     lcAppUrlScheme = @"liveprocess";
     lcSharedDefaults = [[NSUserDefaults alloc] initWithSuiteName:LCSharedUtils.appGroupID];
@@ -301,8 +300,16 @@ NSString *LCPrepareGuestExtension(NSDictionary *request) {
     }
     NSFMGuestExtensionHooksInit(request[@"parentContainerPath"]);
     NSURLSCGuestHooksInit();
+    GuestExtensionHooksInit();
 
-    if (checkJITEnabled()) init_bypassDyldLibValidation();
+    if (!LCSharedUtils.certificatePassword && !isSideStore) {
+#if !TARGET_OS_SIMULATOR
+        if (@available(iOS 26.0, *)) {
+            return @"JITLess mode is required since iOS 26. Please set it up in settings. \nPlease go to LiveContainer settings -> tap \"Import Certificate from SideStore\" / \"Import Certificate\"";
+        }
+#endif
+        if (checkJITEnabled()) init_bypassDyldLibValidation();
+    }
     DyldHooksInit(false, true, 0);
     appMainImageIndex = _dyld_image_count();
     __block void *handle = NULL;
@@ -311,7 +318,7 @@ NSString *LCPrepareGuestExtension(NSDictionary *request) {
     };
     NSDictionary *patchInfo = [NSDictionary dictionaryWithContentsOfFile:[bundlePath stringByAppendingPathComponent:@"LCAppExtension.plist"]];
     if (@available(iOS 27.0, *)) {
-        if ([patchInfo[@"segCountMismatch"] boolValue]) bypass_seg_count_check(load);
+        if ([patchInfo[@"segCountMismatch"] boolValue]) bypass_linkedit_checks(load);
         else load();
     } else {
         load();
@@ -321,6 +328,13 @@ NSString *LCPrepareGuestExtension(NSDictionary *request) {
         return error ? @(error) : @"Unable to load the guest extension";
     }
     appExecutableHandle = handle;
+
+    appMain = getAppEntryPoint(handle);
+    if (!appMain) {
+        return @"Could not find the main entry point";
+    }
+    appMain(argc, argv, envp);
+
     return nil;
 }
 
@@ -591,7 +605,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     LCDocumentPickerHooksInit();
     LCReturnToLibraryHooksInit();
     LCGuestURLRouterInit();
-    if (!isLiveProcess && [guestAppInfo[@"helperProcessesSupport"] boolValue]) {
+    if ([guestAppInfo[@"helperProcessesSupport"] boolValue]) {
         NSExtensionGuestHooksInit(appBundle.bundleURL, [NSURL fileURLWithPath:newHomePath isDirectory:YES]);
     }
     if(!isSideStore) {
@@ -689,7 +703,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     BOOL is27up = false;
     if(@available(iOS 27, *)) { is27up = true; }
     if(is27up && [guestAppInfo[@"segCountMismatch"] boolValue]) {
-        bypass_seg_count_check(dlopenBlock);
+        bypass_linkedit_checks(dlopenBlock);
     } else {
         dlopenBlock();
     }
@@ -1020,10 +1034,3 @@ int LiveContainerMain(int argc, char *argv[]) {
     return LiveContainerSwiftUIMain();
 
 }
-
-#ifdef DEBUG
-int callAppMain(int argc, char *argv[], char *envp[]) {
-    assert(appMain != NULL);
-    __attribute__((musttail)) return appMain(argc, argv, envp);
-}
-#endif

@@ -337,7 +337,7 @@
                     info[@"LCTweakLoaderCantInject"] = @YES;
                     info[@"dontInjectTweakLoader"] = @YES;
                 }
-                if(patchResult & PATCH_EXEC_RESULT_SEG_COUNT_MISMATCH) {
+                if(patchResult & (PATCH_EXEC_RESULT_SEG_COUNT_MISMATCH | PATCH_EXEC_RESULT_MISALIGNED_LINKEDIT_STRING_POOL)) {
                     info[@"segCountMismatch"] = @YES;
                 }
             }
@@ -452,7 +452,8 @@
             hasARM64 = YES;
             encrypted |= LCIsMachOEncrypted(header);
             if (!encrypted) {
-                mismatch |= (LCPatchExecSlice(path.fileSystemRepresentation, header, false, reserveTweakLoaderSlot) & PATCH_EXEC_RESULT_SEG_COUNT_MISMATCH) != 0;
+                int patchResult = LCPatchExecSlice(path.fileSystemRepresentation, header, false, reserveTweakLoaderSlot);
+                mismatch |= (patchResult & (PATCH_EXEC_RESULT_SEG_COUNT_MISMATCH | PATCH_EXEC_RESULT_MISALIGNED_LINKEDIT_STRING_POOL)) != 0;
             }
         });
         if (!error && (!hasARM64 || encrypted)) {
