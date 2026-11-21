@@ -76,6 +76,10 @@ static BOOL LCKeychainIsBoolean(id value) {
     return [value isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID();
 }
 
+static id LCKeychainByteAttribute(id value) {
+    return [value isKindOfClass:NSString.class] ? [value dataUsingEncoding:NSUTF8StringEncoding] : value;
+}
+
 static OSStatus LCValidateTemporaryKeyOptions(id input, BOOL allowKeyDictionaries, BOOL softwareToken,
                                               NSDictionary **validated, NSString **reason) {
     NSDictionary *options = [input isKindOfClass:NSDictionary.class] ? [input copy] : nil;
@@ -88,7 +92,7 @@ static OSStatus LCValidateTemporaryKeyOptions(id input, BOOL allowKeyDictionarie
     dispatch_once(&once, ^{
         softwareOptions = [NSSet setWithArray:@[KC(kSecAttrKeyType), KC(kSecAttrKeyClass),
             KC(kSecAttrKeySizeInBits), KC(kSecAttrEffectiveKeySize), KC(kSecAttrLabel),
-            KC(kSecAttrApplicationTag), KC(kSecAttrCanEncrypt), KC(kSecAttrCanDecrypt),
+            KC(kSecAttrCanEncrypt), KC(kSecAttrCanDecrypt),
             KC(kSecAttrCanDerive), KC(kSecAttrCanSign), KC(kSecAttrCanVerify),
             KC(kSecAttrCanWrap), KC(kSecAttrCanUnwrap)]];
     });
@@ -129,6 +133,14 @@ static OSStatus LCValidateTemporaryKeyOptions(id input, BOOL allowKeyDictionarie
                 continue;
             }
             *reason = @"protected-key";
+        } else if ([key isEqual:KC(kSecAttrApplicationTag)]) {
+            id tag = LCKeychainByteAttribute(value);
+            if (![tag isKindOfClass:NSData.class]) {
+                *reason = @"invalid-application-tag";
+                return errSecParam;
+            }
+            safe[key] = tag;
+            continue;
         } else if ([softwareOptions containsObject:key]) {
             continue;
         } else {
@@ -224,8 +236,7 @@ static BOOL LCKeychainValidAttribute(NSString *key, id value, NSDictionary *type
     if (expected && [key isEqual:KC(kSecAttrAccount)] && [value isKindOfClass:NSData.class]) return YES;
     if (!expected || ![value isKindOfClass:expected]) return NO;
     if ([key isEqualToString:KC(kSecAttrSynchronizable)]) {
-        return (LCKeychainIsBoolean(value) && ![value boolValue]) ||
-            (query && (LCKeychainIsBoolean(value) || [value isEqual:KC(kSecAttrSynchronizableAny)]));
+        return LCKeychainIsBoolean(value) || (query && [value isEqual:KC(kSecAttrSynchronizableAny)]);
     }
     if ([key isEqualToString:KC(kSecAttrAccessible)]) {
         return LCKeychainAccessibilityBuckets()[value] != nil;
@@ -435,15 +446,16 @@ static OSStatus LCKeychainPrepareCertificate(NSMutableDictionary *record, id ref
 }
 
 static NSArray *LCKeychainIdentity(NSDictionary *item) {
+    // Retain the sync flag for local identity and matching, never for routing to iCloud.
+    NSArray *common = @[item[KC(kSecClass)], item[KC(kSecAttrAccessGroup)] ?: @"", item[KC(kSecAttrSynchronizable)] ?: @NO];
     if ([item[KC(kSecClass)] isEqual:KC(kSecClassKey)]) {
-        return @[item[KC(kSecClass)], item[KC(kSecAttrAccessGroup)] ?: @"", item[KC(kSecAttrKeyClass)],
-            item[KC(kSecAttrKeyType)], item[KC(kSecAttrApplicationLabel)], item[KC(kSecAttrApplicationTag)] ?: NSData.data];
+        return [common arrayByAddingObjectsFromArray:@[item[KC(kSecAttrKeyClass)], item[KC(kSecAttrKeyType)],
+            item[KC(kSecAttrApplicationLabel)], item[KC(kSecAttrApplicationTag)] ?: NSData.data]];
     }
     if ([item[KC(kSecClass)] isEqual:KC(kSecClassCertificate)]) {
-        return @[item[KC(kSecClass)], item[KC(kSecAttrAccessGroup)] ?: @"",
-            item[KC(kSecAttrIssuer)], item[KC(kSecAttrSerialNumber)]];
+        return [common arrayByAddingObjectsFromArray:@[item[KC(kSecAttrIssuer)], item[KC(kSecAttrSerialNumber)]]];
     }
-    NSArray *common = @[item[KC(kSecClass)], item[KC(kSecAttrAccessGroup)] ?: @"", item[KC(kSecAttrAccount)] ?: @""];
+    common = [common arrayByAddingObject:item[KC(kSecAttrAccount)] ?: @""];
     if ([item[KC(kSecClass)] isEqual:KC(kSecClassGenericPassword)]) {
         return [common arrayByAddingObject:item[KC(kSecAttrService)] ?: @""];
     }
@@ -566,7 +578,10 @@ static id LCKeychainResult(NSDictionary *item, NSDictionary *privateKey, NSDicti
     NSMutableDictionary *result = returnAttributes ? defaults.mutableCopy : [NSMutableDictionary dictionary];
     if (returnAttributes && privateKey) [result addEntriesFromDictionary:privateKey];
     if (returnAttributes) [result addEntriesFromDictionary:item];
-    if (returnAttributes && privateKey) result[KC(kSecClass)] = KC(kSecClassIdentity);
+    if (returnAttributes && privateKey) {
+        result[KC(kSecClass)] = KC(kSecClassIdentity);
+        result[KC(kSecAttrSynchronizable)] = privateKey[KC(kSecAttrSynchronizable)] ?: @NO;
+    }
     if (returnData) result[KC(kSecValueData)] = item[KC(kSecValueData)];
     [result removeObjectForKey:LCKeychainRecordRef];
     if (returnRef) result[KC(kSecValueRef)] = reference;
@@ -583,7 +598,8 @@ static NSArray *LCKeychainIdentityPair(NSDictionary *item, NSString *hashAttribu
 static BOOL LCKeychainMatches(NSDictionary *item, NSDictionary *key, NSDictionary *query, NSDictionary *defaults) {
     for (NSString *attribute in query) {
         if (key && [attribute isEqual:KC(kSecClass)]) continue;
-        if (![query[attribute] isEqual:(item[attribute] ?: key[attribute] ?: defaults[attribute])]) return NO;
+        id value = key && [attribute isEqual:KC(kSecAttrSynchronizable)] ? key[attribute] : item[attribute] ?: key[attribute];
+        if (![query[attribute] isEqual:(value ?: defaults[attribute])]) return NO;
     }
     return YES;
 }
@@ -931,7 +947,7 @@ static NSDictionary *LCKeychainImportRecord(NSDictionary *native, NSString *item
 
 static NSDictionary *LCKeychainSystemIdentitySelector(NSDictionary *item) {
     NSString *itemClass = item[KC(kSecClass)];
-    if ([item[KC(kSecAttrAccount)] isKindOfClass:NSData.class]) return nil;
+    if ([item[KC(kSecAttrAccount)] isKindOfClass:NSData.class] || [item[KC(kSecAttrSynchronizable)] isEqual:@YES]) return nil;
     NSArray *keys = nil;
     if ([itemClass isEqual:KC(kSecClassGenericPassword)]) keys = @[KC(kSecAttrAccount), KC(kSecAttrService)];
     else if ([itemClass isEqual:KC(kSecClassInternetPassword)]) keys = @[
@@ -1073,6 +1089,7 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
     BOOL returnData = NO, returnAttributes = NO, returnRef = NO, returnPersistentRef = NO;
     BOOL passwordItem = !keyItem && !certificateItem;
     BOOL genericPassword = [itemClass isEqual:KC(kSecClassGenericPassword)];
+    NSString *byteAttribute = genericPassword ? KC(kSecAttrGeneric) : (keyItem || identityItem) ? KC(kSecAttrApplicationTag) : nil;
     BOOL localPasswordRead = passwordItem && operation == LCKeychainCopy;
     BOOL localMetadataSelector = operation != LCKeychainAdd && options[KC(kSecAttrAccessControl)] != nil;
     BOOL allowLegacyRead = !localMetadataSelector;
@@ -1193,11 +1210,11 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
             } else return fail(errSecParam, @"unsupported-match-limit");
         } else if ((certificateItem || keyItem) && [key isEqual:KC(kSecValueRef)]) {
             valueReference = value;
-        } else if (genericPassword && [key isEqual:KC(kSecAttrGeneric)] && [value isKindOfClass:NSString.class]) {
-            NSData *genericData = [value dataUsingEncoding:NSUTF8StringEncoding];
-            if (!genericData) return fail(errSecParam, @"invalid-generic-string-encoding");
-            attributes[key] = genericData;
-            allowLegacyRead = NO;
+        } else if ([key isEqual:byteAttribute] && [value isKindOfClass:NSString.class]) {
+            id bytes = LCKeychainByteAttribute(value);
+            if (!bytes) return fail(errSecParam, genericPassword ? @"invalid-generic-string-encoding" : @"invalid-application-tag");
+            attributes[key] = bytes;
+            if (genericPassword) allowLegacyRead = NO;
         } else if ((operation == LCKeychainAdd && [key isEqual:KC(kSecValueData)] && [value isKindOfClass:NSData.class]) ||
                    LCKeychainValidAttribute(key, value, types, operation != LCKeychainAdd)) {
             attributes[key] = value;
@@ -1229,7 +1246,7 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
                         [attributes removeObjectForKey:name];
                     }
                 }
-                for (NSString *name in @[KC(kSecAttrAccessGroup), KC(kSecAttrAccessible)]) {
+                for (NSString *name in @[KC(kSecAttrAccessGroup), KC(kSecAttrAccessible), KC(kSecAttrSynchronizable)]) {
                     if (attributes[name]) record[name] = attributes[name];
                 }
                 NSString *keyReason = nil;
@@ -1288,29 +1305,32 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
             if (!normalized) normalized = changes.mutableCopy;
             [normalized removeObjectForKey:key];
         }
-        id genericValue = changes[KC(kSecAttrGeneric)];
-        if (genericPassword && [genericValue isKindOfClass:NSString.class]) {
-            NSData *genericData = [genericValue dataUsingEncoding:NSUTF8StringEncoding];
-            if (!genericData) return fail(errSecParam, @"invalid-generic-string-encoding");
+        id byteValue = byteAttribute ? changes[byteAttribute] : nil;
+        if ([byteValue isKindOfClass:NSString.class]) {
+            id bytes = LCKeychainByteAttribute(byteValue);
+            if (!bytes) return fail(errSecParam, genericPassword ? @"invalid-generic-string-encoding" : @"invalid-application-tag");
             if (!normalized) normalized = changes.mutableCopy;
-            normalized[KC(kSecAttrGeneric)] = genericData;
+            normalized[byteAttribute] = bytes;
         }
         if (normalized) changes = normalized;
         for (NSString *key in changes) {
             id value = changes[key];
-            if (certificateItem && ![key isEqual:KC(kSecAttrLabel)] && ![key isEqual:KC(kSecAttrAccessible)]) {
+            BOOL syncChange = !identityItem && [key isEqual:KC(kSecAttrSynchronizable)];
+            if (certificateItem && !syncChange && ![key isEqual:KC(kSecAttrLabel)] && ![key isEqual:KC(kSecAttrAccessible)]) {
                 return fail(errSecUnimplemented, @"unsupported-certificate-update");
             }
-            if (keyItem && ![key isEqual:KC(kSecAttrLabel)] && ![key isEqual:KC(kSecAttrApplicationTag)] &&
+            if (keyItem && !syncChange && ![key isEqual:KC(kSecAttrLabel)] && ![key isEqual:KC(kSecAttrApplicationTag)] &&
                 ![key isEqual:KC(kSecAttrAccessible)]) return fail(errSecUnimplemented, @"unsupported-key-update");
             if ([key isEqual:KC(kSecValueData)] && [value isKindOfClass:NSData.class]) continue;
             if ([key isEqual:KC(kSecAttrAccessGroup)] || !LCKeychainValidAttribute(key, value, types, NO)) return fail(errSecParam, LCKeychainSafeOption(key, value, types));
         }
     }
     if ([attributes[KC(kSecAttrAccount)] isKindOfClass:NSData.class]) allowLegacyRead = NO;
-    BOOL requestsSync = [attributes[KC(kSecAttrSynchronizable)] isEqual:@YES];
-    if (operation != LCKeychainAdd && [attributes[KC(kSecAttrSynchronizable)] isEqual:KC(kSecAttrSynchronizableAny)]) {
-        [attributes removeObjectForKey:KC(kSecAttrSynchronizable)];
+    id sync = attributes[KC(kSecAttrSynchronizable)];
+    BOOL requestsSync = [sync isEqual:@YES];
+    if (operation != LCKeychainAdd) {
+        if ([sync isEqual:KC(kSecAttrSynchronizableAny)]) [attributes removeObjectForKey:KC(kSecAttrSynchronizable)];
+        else if (!sync && !hasPersistentSelector && !valueReference) attributes[KC(kSecAttrSynchronizable)] = @NO;
     }
     if (!directory) return fail(errSecNotAvailable, @"store-unavailable");
     NSFileManager *fm = NSFileManager.defaultManager;
@@ -1607,7 +1627,7 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
                 }
                 [matches enumerateIndexesUsingBlock:^(NSUInteger index, BOOL *stop) {
                     NSDictionary *item = items[index];
-                    if (item[KC(kSecAttrAccessGroup)]) return;
+                    if (item[KC(kSecAttrAccessGroup)] || [item[KC(kSecAttrSynchronizable)] isEqual:@YES]) return;
                     NSMutableDictionary *filter = [@{KC(kSecClass): itemClass} mutableCopy];
                     for (NSString *key in LCKeychainPasswordDefaults(itemClass)) {
                         if (![key isEqual:KC(kSecAttrSynchronizable)]) filter[key] = item[key] ?: defaults[key];
@@ -1678,10 +1698,11 @@ static OSStatus LCKeychainPerform(NSURL *directory, LCKeychainOperation operatio
                     @[KC(kSecAttrAccount), KC(kSecAttrServer), KC(kSecAttrSecurityDomain), KC(kSecAttrProtocol),
                       KC(kSecAttrAuthenticationType), KC(kSecAttrPort), KC(kSecAttrPath)]) :
                     keyItem ? @[KC(kSecAttrApplicationTag)] : @[];
+                if (!identityItem) identityFields = [identityFields arrayByAddingObject:KC(kSecAttrSynchronizable)];
                 for (NSString *field in identityFields) {
                     id value = changes[field];
                     if (!value) continue;
-                    id defaultValue = keyItem ? NSData.data : defaults[field];
+                    id defaultValue = [field isEqual:KC(kSecAttrApplicationTag)] ? NSData.data : defaults[field];
                     NSUInteger changed = [updatedIndexes indexPassingTest:^BOOL(NSUInteger index, BOOL *stop) {
                         return ![value isEqual:(existing[index][field] ?: defaultValue)];
                     }];
@@ -1817,6 +1838,7 @@ static SecKeyRef LCManagedGenerateSoftwareKey(NSURL *directory, NSString *operat
                 [crypto removeObjectForKey:name];
                 continue;
             }
+            if ([name isEqual:KC(kSecAttrApplicationTag)]) value = LCKeychainByteAttribute(value);
             if (!LCKeychainValidAttribute(name, value, LCKeychainAttributeTypes(KC(kSecClassKey)), NO)) {
                 status = errSecParam; reason = @"unsupported-key-storage-option"; break;
             }
